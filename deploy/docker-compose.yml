@@ -1,8 +1,8 @@
 version: "3.8"
 
 # =============================================================================
-# docker-compose.yml — ClickHouse + Grafana services for Sentinel-DNS Track4
-# Issues #11 (S2-T1), #13 (S2-T3)
+# docker-compose.yml — ClickHouse + Grafana + Wazuh services for Sentinel-DNS Track4
+# Issues #11 (S2-T1), #13 (S2-T3), #14 (S2-T4)
 #
 # Usage:
 #   docker compose up -d clickhouse grafana  # start ClickHouse + Grafana
@@ -105,6 +105,36 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Wazuh — SIEM for sentinel-dns alerts
+  # Issue #14 (S2-T4) — syslog ingestion, JSON decoder, rules 100101–100106
+  # ---------------------------------------------------------------------------
+  wazuh:
+    image: wazuh/wazuh-manager:4.9.2
+    container_name: sentinel-wazuh
+    hostname: wazuh
+    ports:
+      - "1514:1514/udp"  # Remote syslog for sentinel-dns alerts
+      - "55000:55000"   # Wazuh API (for dashboard integration)
+    environment:
+      INDEXER_URL: "https://wazuh-indexer:9200"
+      INDEXER_USERNAME: admin
+      INDEXER_PASSWORD: admin
+      FILEBEAT_BOOTSTRAP: "no"
+    volumes:
+      - ./wazuh/etc/ossec.conf:/var/ossec/etc/ossec.conf:ro
+      - ./wazuh/etc/decoders/local_decoder.xml:/var/ossec/etc/decoders/local_decoder.xml:ro
+      - ./wazuh/etc/rules/local_rules.xml:/var/ossec/etc/rules/local_rules.xml:ro
+      - wazuh-data:/var/ossec/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:55000/monitor')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   clickhouse-data:
   grafana-data:
+  wazuh-data:

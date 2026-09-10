@@ -1,0 +1,23 @@
+<!--
+  local_decoder.xml — Sentinel-DNS JSON decoder
+  Issue #14 (S2-T4) — Wazuh syslog ingestion
+
+  Decodes one-line JSON alerts from the Sentinel-DNS agent.
+  The agent sends syslog with program name "sentinel-dns" and a JSON body.
+  This decoder extracts sentinel.verdict and sentinel.confidence into the
+  Wazuh event so that rules (100101–100106) can match on them and the
+  incident panel shows the evidence.
+-->
+<xml>
+  <decoder name="sentinel-dns-json">
+    <program_name>sentinel-dns</program_name>
+    <regex>^{.*"verdict"\s*:\s*"(\w+)".*}$</regex>
+    <order>verdict</order>
+  </decoder>
+
+  <decoder name="sentinel-dns-confidence">
+    <program_name>sentinel-dns</program_name>
+    <regex>^{.*"confidence"\s*:\s*([\d.]+).*}$</regex>
+    <order>confidence</order>
+  </decoder>
+</xml>
