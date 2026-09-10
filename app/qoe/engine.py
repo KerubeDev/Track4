@@ -33,6 +33,10 @@ class MinuteAggregates:
 
     These are the inputs to the QoE engine. The caller (agent/Kafka consumer)
     is responsible for computing these from raw dns_events_raw rows.
+
+    query_count and distinct_clients are carried through for downstream
+    dashboard use (Grafana ClickHouse queries) but are not used by the
+    QoE scoring computation itself.
     """
 
     site: str  # "{zone_id}-{pop_id}"
@@ -119,14 +123,32 @@ def load_zone_mapping(
     return baselines
 
 
-def _normalize_latency(p95_ms: float, max_latency_ms: float) -> int:
+def _clamp_score(raw: float) -> int:
+    """Clamp a raw normalization value to the 0–100 integer range."""
+    return max(0, min(100, int(round(raw))))
+
+
+def _normalize_latency(
+    p95_ms: float,
+    max_latency_ms: float,
+    baseline_p95_latency_ms: float = 0.0,
+) -> int:
     """Normalize p95 latency to 0–100, higher = better.
 
-    Formula: 100 - p95_ms * 100 / max_latency_ms
+    Formula: 100 - p95_ms * 100 / effective_max
+    where effective_max = min(baseline_p95_latency_ms * 3, max_latency_ms)
+    when baseline_p95_latency_ms > 0, else max_latency_ms.
+
+    The 3× multiplier uses the per-site baseline as a soft anchor while
+    preserving the global max_latency_ms as an absolute ceiling.
     Clamped to [0, 100].
     """
-    raw = 100.0 - (p95_ms * 100.0 / max_latency_ms)
-    return max(0, min(100, int(round(raw))))
+    if baseline_p95_latency_ms > 0:
+        effective_max = min(baseline_p95_latency_ms * 3.0, max_latency_ms)
+    else:
+        effective_max = max_latency_ms
+    raw = 100.0 - (p95_ms * 100.0 / effective_max)
+    return _clamp_score(raw)
 
 
 def _normalize_nxdomain(nx_rate: float, clamp_rate: float) -> int:
@@ -137,7 +159,7 @@ def _normalize_nxdomain(nx_rate: float, clamp_rate: float) -> int:
     """
     clamped = min(nx_rate, clamp_rate)
     raw = 100.0 * (1.0 - clamped / clamp_rate)
-    return max(0, min(100, int(round(raw))))
+    return _clamp_score(raw)
 
 
 def _normalize_saturation(qps: float, baseline_qps: float, overflow_multiplier: float) -> int:
@@ -150,7 +172,7 @@ def _normalize_saturation(qps: float, baseline_qps: float, overflow_multiplier: 
         return 0
     threshold = overflow_multiplier * baseline_qps
     raw = 100.0 * (1.0 - min(qps / threshold, 1.0))
-    return max(0, min(100, int(round(raw))))
+    return _clamp_score(raw)
 
 
 def _label_from_score(score: int, labels: list) -> str:
@@ -183,10 +205,16 @@ def compute_qoe(
         zb = baselines[aggregates.site]
         baseline_qps = zb.baseline_qps
 
+    # Resolve per-site baseline for latency normalization
+    baseline_p95_latency_ms = config.defaults.get("baseline_p95_latency_ms", 0.0)
+    if baselines and aggregates.site in baselines:
+        baseline_p95_latency_ms = baselines[aggregates.site].baseline_p95_latency_ms
+
     # Normalize each component to 0–100
     lat_comp = _normalize_latency(
         aggregates.p95_latency_ms,
         config.normalization.max_latency_ms,
+        baseline_p95_latency_ms,
     )
     nx_comp = _normalize_nxdomain(
         aggregates.nxdomain_rate,

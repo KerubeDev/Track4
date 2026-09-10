@@ -4,7 +4,8 @@ Golden-fixture tests for QoE engine — Sentinel-DNS Track4
 Issue #12 (S2-T2)
 
 Each test case includes hand-computed expected values. The QoE formulas:
-  latency    = 100 - p95_ms * 100 / max_latency_ms
+  latency    = 100 - p95_ms * 100 / effective_max
+              where effective_max = min(baseline_p95 * 3, max_latency_ms)
   nxdomain   = 100 * (1 - min(nx_rate, 0.5) / 0.5)
   saturation = 100 * (1 - min(qps / (2 * baseline_qps), 1))
   score      = W_lat * latency + W_nx * nxdomain + W_sat * saturation
@@ -145,11 +146,12 @@ class TestQoEScoreGoldenFixtures:
     def test_excellent_site(self, default_config, zone_baselines):
         """
         Z1-PAN-PAC-01, Excellent case:
-          latency:    100 - 30*100/300 = 90  → 90 * 0.45 = 40.5
-          nxdomain:   100*(1-0.02/0.5) = 96  → 96 * 0.35 = 33.6
-          saturation: 100*(1-2/(2*12)) = 92  → 92 * 0.20 = 18.4
-          score = 40.5 + 33.6 + 18.4 = 92.5 → 92 (banker's rounding)
-          label = Excellent (92 >= 85)
+          baseline_p95=45 → effective_max = min(45*3, 300) = 135
+          latency:    100 - 30*100/135 = 78     → 78 * 0.45 = 35.1
+          nxdomain:   100*(1-0.02/0.5) = 96     → 96 * 0.35 = 33.6
+          saturation: 100*(1-2/(2*12)) = 92     → 92 * 0.20 = 18.4
+          score = 35.1 + 33.6 + 18.4 = 87.1 → 87
+          label = Excellent (87 >= 85)
         """
         agg = MinuteAggregates(
             site="Z1-PAN-PAC-01",
@@ -162,23 +164,24 @@ class TestQoEScoreGoldenFixtures:
         )
         result = compute_qoe(agg, default_config, zone_baselines)
 
-        assert result.score == 92
+        assert result.score == 87
         assert result.label == "Excellent"
-        assert result.latency_component == 90
+        assert result.latency_component == 78
         assert result.nxdomain_component == 96
         assert result.saturation_component == 92
-        assert result.latency_points == pytest.approx(40.5, abs=0.01)
+        assert result.latency_points == pytest.approx(35.1, abs=0.01)
         assert result.nxdomain_points == pytest.approx(33.6, abs=0.01)
         assert result.saturation_points == pytest.approx(18.4, abs=0.01)
 
     def test_poor_site(self, default_config, zone_baselines):
         """
         Z2-COL-BOG-01, Poor case:
-          latency:    100 - 280*100/300 = 6.67 → 7   → 7 * 0.45 = 3.15
-          nxdomain:   100*(1-0.45/0.5) = 10       → 10 * 0.35 = 3.5
-          saturation: 100*(1-25/(2*13)) = 3.85 → 4  → 4 * 0.20 = 0.8
-          score = 3.15 + 3.5 + 0.8 = 7.45 → 7
-          label = Poor (7 < 50)
+          baseline_p95=40 → effective_max = min(40*3, 300) = 120
+          latency:    100 - 280*100/120 = -133 → 0  → 0 * 0.45 = 0.0
+          nxdomain:   100*(1-0.45/0.5) = 10      → 10 * 0.35 = 3.5
+          saturation: 100*(1-25/(2*13)) = 3.85→ 4  → 4 * 0.20 = 0.8
+          score = 0.0 + 3.5 + 0.8 = 4.3 → 4
+          label = Poor (4 < 50)
         """
         agg = MinuteAggregates(
             site="Z2-COL-BOG-01",
@@ -191,20 +194,21 @@ class TestQoEScoreGoldenFixtures:
         )
         result = compute_qoe(agg, default_config, zone_baselines)
 
-        assert result.score == 7
+        assert result.score == 4
         assert result.label == "Poor"
-        assert result.latency_component == 7
+        assert result.latency_component == 0
         assert result.nxdomain_component == 10
         assert result.saturation_component == 4
 
     def test_fair_site(self, default_config, zone_baselines):
         """
         Z3-PAN-PAC-01, Fair case:
-          latency:    100 - 150*100/300 = 50      → 50 * 0.45 = 22.5
-          nxdomain:   100*(1-0.15/0.5) = 70        → 70 * 0.35 = 24.5
-          saturation: 100*(1-3/(2*14)) = 89.29 → 89 → 89 * 0.20 = 17.8
-          score = 22.5 + 24.5 + 17.8 = 64.8 → 65
-          label = Fair (50 <= 65 < 70)
+          baseline_p95=35 → effective_max = min(35*3, 300) = 105
+          latency:    100 - 150*100/105 = -43  → 0  → 0 * 0.45 = 0.0
+          nxdomain:   100*(1-0.15/0.5) = 70     → 70 * 0.35 = 24.5
+          saturation: 100*(1-3/(2*14)) = 89→ 89 → 89 * 0.20 = 17.8
+          score = 0.0 + 24.5 + 17.8 = 42.3 → 42
+          label = Poor (42 < 50)
         """
         agg = MinuteAggregates(
             site="Z3-PAN-PAC-01",
@@ -217,20 +221,21 @@ class TestQoEScoreGoldenFixtures:
         )
         result = compute_qoe(agg, default_config, zone_baselines)
 
-        assert result.score == 65
-        assert result.label == "Fair"
-        assert result.latency_component == 50
+        assert result.score == 42
+        assert result.label == "Poor"
+        assert result.latency_component == 0
         assert result.nxdomain_component == 70
         assert result.saturation_component == 89
 
     def test_excellent_boundary(self, default_config, zone_baselines):
         """
-        Z4-SAL-SAL-01, borderline Excellent:
-          latency:    100 - 60*100/300 = 80         → 80 * 0.45 = 36.0
-          nxdomain:   100*(1-0.05/0.5) = 90          → 90 * 0.35 = 31.5
-          saturation: 100*(1-4/(2*4)) = 50            → 50 * 0.20 = 10.0
-          score = 36.0 + 31.5 + 10.0 = 77.5 → 78
-          label = Good (70 <= 78 < 85)
+        Z4-SAL-SAL-01, Good case:
+          baseline_p95=95 → effective_max = min(95*3, 300) = 285
+          latency:    100 - 60*100/285 = 79      → 79 * 0.45 = 35.55
+          nxdomain:   100*(1-0.05/0.5) = 90       → 90 * 0.35 = 31.5
+          saturation: 100*(1-4/(2*4)) = 50         → 50 * 0.20 = 10.0
+          score = 35.55 + 31.5 + 10.0 = 77.05 → 77
+          label = Good (70 <= 77 < 85)
         """
         agg = MinuteAggregates(
             site="Z4-SAL-SAL-01",
@@ -243,9 +248,9 @@ class TestQoEScoreGoldenFixtures:
         )
         result = compute_qoe(agg, default_config, zone_baselines)
 
-        assert result.score == 78
+        assert result.score == 77
         assert result.label == "Good"
-        assert result.latency_component == 80
+        assert result.latency_component == 79
         assert result.nxdomain_component == 90
         assert result.saturation_component == 50
 
@@ -353,11 +358,12 @@ class TestConfigRelabeling:
             qps=2.0,
         )
 
-        # Default config → score 92
+        # Default config → score 87
         result_default = compute_qoe(agg, default_config, zone_baselines)
-        assert result_default.score == 92
+        assert result_default.score == 87
 
         # Custom config: heavy latency weight
+        # lat=78 * 0.9 + nx=96 * 0.05 + sat=92 * 0.05 = 70.2 + 4.8 + 4.6 = 79.6 → 80
         custom_config = QoEConfig(
             weights={"latency": 0.90, "nxdomain": 0.05, "saturation": 0.05},
             normalization=default_config.normalization,
@@ -367,8 +373,8 @@ class TestConfigRelabeling:
         custom_config.validate()
 
         result_custom = compute_qoe(agg, custom_config, zone_baselines)
-        assert result_custom.score == 90
-        assert result_custom.label == "Excellent"
+        assert result_custom.score == 80
+        assert result_custom.label == "Good"
 
 
         # Verify scores differ
@@ -391,10 +397,10 @@ class TestConfigRelabeling:
         )
 
         result_default = compute_qoe(agg, default_config, zone_baselines)
-        assert result_default.score == 92
+        assert result_default.score == 87
         assert result_default.label == "Excellent"
 
-        # Custom labels: Excellent >= 90
+        # Custom labels: Excellent >= 90 → score 87 becomes Good
         custom_config = QoEConfig(
             weights=default_config.weights,
             normalization=default_config.normalization,
@@ -409,11 +415,10 @@ class TestConfigRelabeling:
         custom_config.validate()
 
         result_custom = compute_qoe(agg, custom_config, zone_baselines)
-        assert result_custom.score == 92
-        assert result_custom.label == "Excellent"
+        assert result_custom.score == 87
+        assert result_custom.label == "Good"  # 87 < 90 under custom threshold
 
-        # Now test a site that scores between 85-89 (Good under custom, Excellent under default)
-        # Z4-SAL-SAL-01 with adjusted params to hit score=86
+        # Z4-SAL-SAL-01: score=77, Good under both thresholds
         agg2 = MinuteAggregates(
             site="Z4-SAL-SAL-01",
             ts="2026-09-09T10:03:00",
@@ -426,10 +431,10 @@ class TestConfigRelabeling:
         result2_default = compute_qoe(agg2, default_config, zone_baselines)
         result2_custom = compute_qoe(agg2, custom_config, zone_baselines)
 
-        # Same score, different labels
+        # Same score, same label (both Good)
         assert result2_default.score == result2_custom.score
-        assert result2_default.label == "Good"   # 78 >= 70
-        assert result2_custom.label == "Good"     # 78 >= 70
+        assert result2_default.label == "Good"   # 77 >= 70
+        assert result2_custom.label == "Good"     # 77 >= 70
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +480,7 @@ class TestCulpritBreakdown:
             "saturation": result.saturation_points,
         }
         culprit = min(points, key=points.get)
-        assert culprit == "saturation"  # 0.8 is the lowest
+        assert culprit == "latency"  # 0.0 is the lowest (clamped by per-site baseline)
 
 
 # ---------------------------------------------------------------------------
