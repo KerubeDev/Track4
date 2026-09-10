@@ -1,5 +1,9 @@
 import json
+import os
 import time
+from unittest.mock import patch
+
+import pytest
 
 from app.agent.qvac_adapter import MODEL, QVACAdapter
 
@@ -51,8 +55,55 @@ def test_invalid_contract_retries_with_bounded_budget():
     assert len(calls) == 3
 
 
+def _failing_transport(calls):
+    def _transport(*args):
+        calls.append(args)
+        raise OSError("offline")
+    return _transport
+
+
 def test_transport_failure_does_not_attempt_network_when_fake_transport_is_used():
     calls = []
-    result = QVACAdapter(transport=lambda *args: calls.append(args) or (_ for _ in ()).throw(OSError("offline"))).infer("x", {})
+    result = QVACAdapter(transport=_failing_transport(calls)).infer("x", {})
     assert result.verdict == "unverified"
     assert len(calls) == 2
+
+
+def test_fake_transport_never_touches_real_http_transport():
+    calls = []
+
+    def transport(*_):
+        calls.append(1)
+        return response()
+
+    with patch.object(
+        QVACAdapter,
+        "_http_transport",
+        side_effect=AssertionError("network egress attempted"),
+    ):
+        result = QVACAdapter(transport=transport).infer("x.example", {})
+    assert result.verdict == "dga"
+    assert len(calls) == 1
+
+
+@pytest.mark.skipif(
+    os.environ.get("QVAC_LIVE_SMOKE") != "1",
+    reason="live QVAC smoke requires QVAC_LIVE_SMOKE=1 and a reachable local QVAC service",
+)
+def test_live_qvac_smoke_known_dga_and_benign():
+    adapter = QVACAdapter()
+    dga = adapter.infer(
+        "flub-19k.gcpvls.kixgxsvw.top",
+        {"entropy": {"value": 6.1}},
+        {"client_ip": "10.0.0.1"},
+    )
+    benign = adapter.infer(
+        "www.google.com",
+        {"entropy": {"value": 2.4}},
+        {"client_ip": "10.0.0.1"},
+    )
+    if "unverified" in (dga.verdict, benign.verdict):
+        pytest.skip("local QVAC service unavailable")
+    assert dga.verdict == "dga"
+    assert dga.confidence >= 0.7
+    assert benign.verdict == "benign"

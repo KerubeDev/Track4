@@ -54,10 +54,12 @@ def _handle_signal(signum: int, _frame: Any) -> None:
 
 
 def _process_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Process a single DNS event through the filter.
+    """Process a single DNS event: deterministic filter then QVAC verdict.
 
-    Returns an alert dict if escalation is triggered, else None.
-    This is a stub — the full 5-signal filter is in issue #8 (S1-T4).
+    Runs the 5-signal deterministic filter; if it produces a candidate,
+    sends it through QVAC for a verdict and returns an alert dict with
+    verdict, confidence, and metadata. Returns None when no escalation
+    is triggered.
     """
     candidate = _filter.process(event)
     if candidate is None:

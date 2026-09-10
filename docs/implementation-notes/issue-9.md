@@ -11,4 +11,6 @@
 
 - `pytest -q tests/test_qvac_adapter.py`
 - Full `pytest -q` run at completion.
-- Live QVAC smoke was not run because no local QVAC service/model is available in this environment.
+- Added opt-in live smoke test (`QVAC_LIVE_SMOKE=1`): known DGA qname with confidence >= 0.7 and benign vocabulary qname; skips when not enabled or when no local QVAC service is reachable.
+- Added explicit no-egress assertion: verifies the injected fake transport never calls the real HTTP transport.
+- Live QVAC smoke was not run because no local QVAC service/model is available in this environment; the skipped-validation note is retained.
