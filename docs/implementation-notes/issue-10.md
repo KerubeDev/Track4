@@ -12,6 +12,7 @@
 - `app/eval/harness.evaluate(...)` is the seam: pluggable `DeterministicFilter`, QVAC source, and injected `clock` for deterministic latency measurement in tests.
 - `app/eval/qvac.py` — deterministic `MockQVAC` keyed on filter signal evidence (mirrors the demo QVAC stub's verdict families), plus `AdapterQVAC` for live runs against the local QVAC service via `QVACAdapter`.
 - `app/eval/__main__.py` — CLI (`python -m app.eval --run run.jsonl [--qvac mock|adapter] [--out report.json]`) emitting a single JSON report plus a human-readable summary.
+- The CLI accepts `--min-benign-elimination RATE` for an executable acceptance check; it exits non-zero when a recorded run is below the required threshold.
 - Ground-truth isolation is structural: `agent_view()` strips `ground_truth` before anything reaches the filter or QVAC; the scoring side keeps a separate label copy (`ground_truth_label`). Tested with spy filter/QVAC asserting the field never appears.
 - Added `tests/test_eval_harness.py`:
   - Golden fixture (16 queries, deterministic per-client filter windows) with a hand-calculated matrix — asserts TP/FP/FN/TN, per-class precision/recall/F1, macro, accuracy, elimination, and p50/p95 latency match hand calculation.

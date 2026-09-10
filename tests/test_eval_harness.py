@@ -256,6 +256,22 @@ class EvalCliTest(unittest.TestCase):
             self.assertIn("summary", report)
             self.assertEqual(report["elimination"]["benign_elimination_rate"], 4 / 6)
 
+    def test_cli_threshold_check_fails_below_required_rate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_path = os.path.join(tmp, "run.jsonl")
+            report_path = os.path.join(tmp, "report.json")
+            with open(run_path, "w", encoding="utf-8") as handle:
+                for event in golden_events():
+                    handle.write(json.dumps(event) + "\n")
+
+            result = subprocess.run(
+                [sys.executable, "-m", "app.eval", "--run", run_path,
+                 "--out", report_path, "--min-benign-elimination", "0.8"],
+                cwd=REPO, capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("below required 80.0%", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

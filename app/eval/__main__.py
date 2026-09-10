@@ -31,6 +31,8 @@ def parse_args(argv=None):
     parser.add_argument("--out", default="eval-report.json", help="JSON report output path")
     parser.add_argument("--no-summary", action="store_true",
                         help="suppress the human-readable summary on stdout")
+    parser.add_argument("--min-benign-elimination", type=float, default=None,
+                        help="fail if benign elimination is below this fraction")
     return parser.parse_args(argv)
 
 
@@ -59,6 +61,14 @@ def main(argv=None) -> int:
 
     if not args.no_summary:
         print(report.summary_text())
+    if (args.min_benign_elimination is not None
+            and report.elimination.benign_elimination_rate < args.min_benign_elimination):
+        print(
+            f"FAIL: benign elimination {report.elimination.benign_elimination_rate:.1%} "
+            f"is below required {args.min_benign_elimination:.1%}",
+            file=sys.stderr,
+        )
+        return 1
     print(f"report written to {args.out}", file=sys.stderr)
     return 0
 
