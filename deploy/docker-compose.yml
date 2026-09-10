@@ -242,7 +242,7 @@ services:
       timeout: 5s
       retries: 1
     volumes:
-      - ./:/scripts:ro
+      - ./clickhouse:/scripts:ro
 
   # ---------------------------------------------------------------------------
   # Seed fixtures — dev/test only

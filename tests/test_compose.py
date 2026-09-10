@@ -289,6 +289,22 @@ class TestProvisionIdempotency:
         assert "Grafana" in provision_script
         assert "Wazuh" in provision_script
 
+    def test_provision_mount_points_to_clickhouse_dir(
+        self, compose_config: Dict[str, Any]
+    ) -> None:
+        """Provision must mount ./clickhouse:/scripts so the script resolves."""
+        volumes = compose_config["services"]["provision"]["volumes"]
+        assert any(
+            vol.startswith("./clickhouse:") or vol.startswith("./clickhouse /")
+            for vol in volumes
+        ), f"Provision should mount ./clickhouse:/scripts, got: {volumes}"
+
+    def test_provision_mount_supported_by_script(self, provision_script: str) -> None:
+        """Provision script schema path must resolve under the clickhouse mount."""
+        assert "${SCRIPT_DIR}/schema.sql" in provision_script, (
+            "SCHEMA_FILE must resolve next to the script (${SCRIPT_DIR}/schema.sql)"
+        )
+
     def test_provision_has_idempotent_message(self, provision_script: str) -> None:
         """provision-full.sh mentions idempotency."""
         assert "idempotent" in provision_script.lower() or "multiple times" in provision_script.lower()
