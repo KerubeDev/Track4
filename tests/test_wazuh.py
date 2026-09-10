@@ -36,7 +36,6 @@ from app.agent.alert_publisher import (
     VERDICT_MAP,
     DGA_CONFIDENCE_RULES,
     DGA_DEFAULT_RULE,
-    DGA_CONFIDENCE_THRESHOLD,
     VerdictInfo,
     resolve_wazuh_rule,
     format_alert,

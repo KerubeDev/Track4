@@ -27,9 +27,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Verdict → Wazuh rule ID + severity mapping (P3b / ADR-0004)
 # ---------------------------------------------------------------------------
-# Confidence threshold for DGA high vs low confidence split
-DGA_CONFIDENCE_THRESHOLD = 0.90
-
 # Confidence-keyed rules for DGA (threshold → rule).
 DGA_CONFIDENCE_RULES: Dict[float, Dict[str, Any]] = {
     0.90: {"rule_id": 100101, "severity": 12},
