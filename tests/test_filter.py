@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from app.agent.filter import DeterministicFilter, FilterConfig
+from app.emulator.attacks import episode_e4_beaconing
 
 
 def event(at, qname="normal.example", rcode="NOERROR", client="10.0.0.1"):
@@ -46,6 +47,21 @@ class FilterTest(unittest.TestCase):
         f = DeterministicFilter(FilterConfig(entropy=0))
         result = f.process(event(self.start, "micrpsoft.com"))
         self.assertTrue(result["signals"]["rarity"]["typosquat"])
+
+    def test_beaconing_detects_periodic_bursts(self):
+        f = DeterministicFilter()
+        qname = "cdn-metrics-update.example"
+        result = None
+        for i in range(4):
+            for j in range(15):
+                result = f.process(event(self.start + timedelta(seconds=i * 20 + j * 0.1), qname))
+        self.assertIn("beaconing", result["signals"])
+
+    def test_expired_client_keys_are_removed(self):
+        f = DeterministicFilter()
+        f.process(event(self.start, client="10.0.0.1"))
+        f.process(event(self.start + timedelta(seconds=61), client="10.0.0.2"))
+        self.assertNotIn("10.0.0.1", f._windows)
 
 
 if __name__ == "__main__":

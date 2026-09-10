@@ -62,6 +62,12 @@ class DeterministicFilter:
         cutoff = now - self.config.window_seconds
         while window and window[0][0] < cutoff:
             window.popleft()
+        for client, client_window in list(self._windows.items()):
+            if client != key:
+                while client_window and client_window[0][0] < cutoff:
+                    client_window.popleft()
+            if not client_window:
+                del self._windows[client]
         events = [item for _, item in window]
         signals: dict[str, dict] = {}
         nx_ratio = sum(e.get("rcode") == "NXDOMAIN" for e in events) / len(events)
@@ -87,9 +93,10 @@ class DeterministicFilter:
 
         timestamps = [stamp for stamp, e in window if e.get("qname") == event.get("qname")]
         intervals = [b - a for a, b in zip(timestamps, timestamps[1:])]
-        variance = sum((x - sum(intervals) / len(intervals)) ** 2 for x in intervals) / len(intervals) if intervals else float("inf")
-        if intervals and variance <= self.config.beacon_variance:
-            signals["beaconing"] = {"interval_variance": round(variance, 3), "intervals": len(intervals)}
+        burst_gaps = [interval for interval in intervals if interval >= 5.0]
+        variance = sum((x - sum(burst_gaps) / len(burst_gaps)) ** 2 for x in burst_gaps) / len(burst_gaps) if burst_gaps else float("inf")
+        if len(burst_gaps) >= 2 and variance <= self.config.beacon_variance:
+            signals["beaconing"] = {"interval_variance": round(variance, 3), "intervals": len(burst_gaps)}
 
         escalates = any(name in signals for name in ("nxdomain_ratio", "long_high_entropy_repetition", "beaconing"))
         escalates |= "entropy" in signals and "rarity" in signals
