@@ -1,5 +1,6 @@
 import glob
 import heapq
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -22,24 +23,34 @@ def find_dataset_files(directory):
 
 
 def _natural_key(path):
-    stem = path.rsplit("/", 1)[-1].removeprefix("queries.")
+    """Ordering key for query files; unnumbered stems sort last."""
+    stem = os.path.basename(path).removeprefix("queries.")
     digits = "".join(ch for ch in stem if ch.isdigit())
     return int(digits) if digits else float("inf")
 
 
-def merged_stream(paths):
-    iterators = [iter_file(path) for path in paths]
+def heap_merge(iterables, key):
+    """Merge sorted iterables by key(item), yielding items in key order."""
     heap = []
-    for idx, iterator in enumerate(iterators):
-        record = next(iterator, None)
-        if record is not None:
-            heapq.heappush(heap, (record.timestamp, idx, record))
+    counter = 0
+    for idx, stream in enumerate(iterables):
+        iterator = iter(stream)
+        item = next(iterator, None)
+        if item is not None:
+            heap.append((key(item), idx, counter, item, iterator))
+            counter += 1
+    heapq.heapify(heap)
     while heap:
-        _, idx, record = heapq.heappop(heap)
-        yield record
-        nxt = next(iterators[idx], None)
+        _, idx, _, item, iterator = heapq.heappop(heap)
+        yield item
+        nxt = next(iterator, None)
         if nxt is not None:
-            heapq.heappush(heap, (nxt.timestamp, idx, nxt))
+            heapq.heappush(heap, (key(nxt), idx, counter, nxt, iterator))
+            counter += 1
+
+
+def merged_stream(paths):
+    return heap_merge((iter_file(path) for path in paths), key=lambda r: r.timestamp)
 
 
 class Replayer:

@@ -1,4 +1,24 @@
+import sys
+
 from app.emulator.events import TOPIC
+
+MAX_BUFFER_RETRIES = 10
+
+
+class KafkaPartitionError(RuntimeError):
+    pass
+
+
+def _topic_partition_count(bootstrap_servers, topic):
+    from confluent_kafka.admin import AdminClient
+
+    metadata = AdminClient({"bootstrap.servers": bootstrap_servers}).list_topics(
+        topic, timeout=10
+    )
+    partitions = metadata.topics.get(topic)
+    if partitions is None:
+        raise KafkaPartitionError(f"topic {topic!r} not found")
+    return len(partitions.partitions)
 
 
 class Emitter:
@@ -6,6 +26,9 @@ class Emitter:
         raise NotImplementedError
 
     def flush(self):
+        pass
+
+    def close(self):
         pass
 
 
@@ -29,38 +52,67 @@ class JsonLinesEmitter(Emitter):
     def flush(self):
         self._handle.flush()
 
+    def close(self):
+        if self._handle is not sys.stdout:
+            self._handle.close()
+
 
 class KafkaEmitter(Emitter):
-    def __init__(self, bootstrap_servers, topic=TOPIC, partitions=3, **producer_opts):
-        try:
-            from confluent_kafka import Producer
-        except ImportError as exc:
-            raise ImportError(
-                "confluent-kafka is required for KafkaEmitter; "
-                "install with `pip install -r requirements-kafka.txt`"
-            ) from exc
+    def __init__(
+        self,
+        bootstrap_servers,
+        topic=TOPIC,
+        partitions=3,
+        producer_factory=None,
+        partition_checker=None,
+        **producer_opts,
+    ):
+        if producer_factory is None:
+            try:
+                from confluent_kafka import Producer
+            except ImportError as exc:
+                raise ImportError(
+                    "confluent-kafka is required for KafkaEmitter; "
+                    "install with `pip install -r requirements-kafka.txt`"
+                ) from exc
+            producer_factory = Producer
         options = {
             "bootstrap.servers": bootstrap_servers,
             "partitioner": "consistent_random",
         }
         options.update(producer_opts)
-        self._producer = Producer(options)
+        self._producer = producer_factory(options)
         self.topic = topic
         self.partitions = partitions
         self.count = 0
         self.failed = 0
+        checker = partition_checker if partition_checker is not None else _topic_partition_count
+        actual = checker(bootstrap_servers, topic)
+        if actual != partitions:
+            raise KafkaPartitionError(
+                f"topic {topic!r} has {actual} partition(s), expected {partitions}"
+            )
 
     def emit(self, event):
-        try:
-            self._producer.produce(
-                topic=self.topic,
-                key=event.client_ip.encode("utf-8"),
-                value=event.to_json().encode("utf-8"),
-            )
-            self.count += 1
-        except BufferError:
-            self._producer.poll(0.5)
-            self.emit(event)
+        attempts = 0
+        while True:
+            try:
+                self._producer.produce(
+                    topic=self.topic,
+                    key=event.client_ip.encode("utf-8"),
+                    value=event.to_json().encode("utf-8"),
+                )
+                self.count += 1
+                return
+            except BufferError:
+                attempts += 1
+                if attempts >= MAX_BUFFER_RETRIES:
+                    self.failed += 1
+                    return
+                self._producer.poll(0.5)
 
     def flush(self):
         self._producer.flush()
+
+    def close(self):
+        self.flush()

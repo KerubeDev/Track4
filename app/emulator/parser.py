@@ -14,6 +14,8 @@ _TS_FMT = "%d-%b-%Y %H:%M:%S.%f"
 
 _UNESCAPE = [(r"\(", "("), (r"\)", ")"), (r"\\", "\\")]
 
+bad_decodes = 0
+
 
 class ParseError(ValueError):
     pass
@@ -54,11 +56,17 @@ def parse_line(line: str, source_file: str) -> QueryRecord:
 
 
 def iter_file(path: str, source_file: str | None = None):
+    global bad_decodes
     source = source_file or path
-    with open(path, "r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            if not line.strip():
+    with open(path, "rb") as handle:
+        for raw in handle:
+            if not raw.strip():
                 continue
+            try:
+                line = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                bad_decodes += 1
+                line = raw.decode("utf-8", errors="replace")
             yield parse_line(line, source)
 
 

@@ -3,6 +3,7 @@ import os
 import random
 import sys
 
+from app.emulator import parser
 from app.emulator.emitter import JsonLinesEmitter, KafkaEmitter, NullEmitter
 from app.emulator.mapping import ZoneMapping, DEFAULT_MAPPING_PATH
 from app.emulator.playback import Playback, synthesize_stream
@@ -65,13 +66,12 @@ def run(argv=None):
     playback = Playback(ReplayConfig(replay_rate=args.rate, seed=args.seed))
     stream = _limited(background, args.limit)
     stats = playback.run(stream, emitter)
-
-    if hasattr(emitter, "close"):
-        emitter.close()
+    emitter.close()
     print(
         f"replayed={stats.events} attack={stats.attack_events} "
         f"window=({stats.first_ts} .. {stats.last_ts}) "
-        f"rate=x{_display_rate(args.rate)} seed={args.seed} emit={args.emit}"
+        f"rate=x{_display_rate(args.rate)} seed={args.seed} emit={args.emit} "
+        f"decode_errs={parser.bad_decodes}"
     )
     return stats
 

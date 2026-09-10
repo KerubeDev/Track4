@@ -1,9 +1,17 @@
 import io
 import json
+import sys
 import unittest
 from datetime import datetime
 
-from app.emulator.emitter import JsonLinesEmitter, KafkaEmitter, NullEmitter
+from app.emulator.emitter import (
+    MAX_BUFFER_RETRIES,
+    Emitter,
+    JsonLinesEmitter,
+    KafkaEmitter,
+    KafkaPartitionError,
+    NullEmitter,
+)
 from app.emulator.events import TOPIC
 from app.emulator.parser import QueryRecord
 from app.emulator.synthesizer import DnstapSynthesizer
@@ -45,6 +53,18 @@ class JsonLinesEmitterTest(unittest.TestCase):
         emitter.flush()
         self.assertIn('"ground_truth":null', handle.getvalue())
 
+    def test_close_closes_handle(self):
+        handle = io.StringIO()
+        emitter = JsonLinesEmitter(handle)
+        emitter.emit(_event())
+        emitter.close()
+        self.assertTrue(handle.closed)
+
+    def test_close_keeps_stdout_open(self):
+        emitter = JsonLinesEmitter(sys.stdout)
+        emitter.close()
+        self.assertFalse(sys.stdout.closed)
+
 
 class KafkaEmitterTest(unittest.TestCase):
     def test_requires_confluent_kafka(self):
@@ -57,6 +77,63 @@ class KafkaEmitterTest(unittest.TestCase):
 
     def test_topic_default(self):
         self.assertEqual(TOPIC, "dns.telemetry.v1")
+
+    def test_emit_success(self):
+        fake = _FakeProducer(None)
+        emitter = _kafka(fake)
+        emitter.emit(_event())
+        self.assertEqual(emitter.count, 1)
+        self.assertEqual(emitter.failed, 0)
+        self.assertEqual(fake.produced, 1)
+
+    def test_buffer_error_retry_is_bounded(self):
+        fake = _FakeProducer(None)
+        fake.fail = True
+        emitter = _kafka(fake)
+        emitter.emit(_event())
+        self.assertEqual(emitter.count, 0)
+        self.assertEqual(emitter.failed, 1)
+        self.assertEqual(fake.produced, 0)
+        self.assertEqual(fake.polls, MAX_BUFFER_RETRIES - 1)
+
+    def test_partition_match_passes(self):
+        _kafka(_FakeProducer(None), checker=lambda bootstrap, topic: 3)
+
+    def test_partition_mismatch_raises(self):
+        with self.assertRaises(KafkaPartitionError):
+            _kafka(_FakeProducer(None), checker=lambda bootstrap, topic: 2)
+
+
+class EmitterBaseTest(unittest.TestCase):
+    def test_base_emitter_has_close(self):
+        self.assertIsNone(Emitter().close())
+
+
+def _kafka(fake, checker=lambda bootstrap, topic: 3):
+    return KafkaEmitter(
+        "localhost:9092",
+        producer_factory=lambda options: fake,
+        partition_checker=checker,
+    )
+
+
+class _FakeProducer:
+    def __init__(self, options):
+        self.options = options
+        self.produced = 0
+        self.polls = 0
+        self.fail = False
+
+    def produce(self, **kwargs):
+        if self.fail:
+            raise BufferError("queue full")
+        self.produced += 1
+
+    def poll(self, timeout):
+        self.polls += 1
+
+    def flush(self):
+        pass
 
 
 def _event():

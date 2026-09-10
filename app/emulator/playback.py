@@ -1,7 +1,6 @@
-import heapq
 from dataclasses import dataclass
 
-from app.emulator.replay import Replayer, parse_event_timestamp
+from app.emulator.replay import Replayer, heap_merge, parse_event_timestamp
 
 
 @dataclass(frozen=True)
@@ -19,22 +18,7 @@ def synthesize_stream(records, mapping, synthesizer):
 
 
 def merge_event_streams(*streams):
-    heap = []
-    counter = 0
-    for idx, stream in enumerate(streams):
-        iterator = iter(stream)
-        item = next(iterator, None)
-        if item is not None:
-            heap.append((item.timestamp, idx, counter, item, iterator))
-            counter += 1
-    heapq.heapify(heap)
-    while heap:
-        _, idx, _, item, iterator = heapq.heappop(heap)
-        yield item
-        nxt = next(iterator, None)
-        if nxt is not None:
-            heapq.heappush(heap, (nxt.timestamp, idx, counter, nxt, iterator))
-            counter += 1
+    return heap_merge(streams, key=lambda e: e.timestamp)
 
 
 class Playback:
