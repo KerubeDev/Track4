@@ -23,6 +23,7 @@ from typing import Any, Dict, Optional
 
 from app.common.health import start_health_server
 from app.common.kafka import wait_for_kafka
+from app.agent.filter import DeterministicFilter
 
 logger = logging.getLogger("sentinel.agent")
 
@@ -41,6 +42,7 @@ WAZUH_PORT: int = int(os.environ.get("WAZUH_PORT", "1514"))
 HEALTH_PORT: int = int(os.environ.get("AGENT_HEALTH_PORT", "8081"))
 
 _running = True
+_filter = DeterministicFilter()
 
 
 def _handle_signal(signum: int, _frame: Any) -> None:
@@ -55,17 +57,16 @@ def _process_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     Returns an alert dict if escalation is triggered, else None.
     This is a stub — the full 5-signal filter is in issue #8 (S1-T4).
     """
-    rcode = event.get("rcode", "")
-    if rcode == "NXDOMAIN":
-        return {
-            "verdict": "unverified",
-            "confidence": 0.0,
-            "qname": event.get("qname", ""),
-            "client_ip": event.get("client_ip", ""),
-            "reasoning_short": "NXDOMAIN detected (stub filter)",
-            "recommended_action": "Monitor",
-        }
-    return None
+    candidate = _filter.process(event)
+    if candidate is None:
+        return None
+    return {
+        **candidate,
+        "verdict": "unverified",
+        "confidence": 0.0,
+        "reasoning_short": "Deterministic escalation: " + ", ".join(candidate["signals"]),
+        "recommended_action": "Investigate",
+    }
 
 
 def run() -> None:
