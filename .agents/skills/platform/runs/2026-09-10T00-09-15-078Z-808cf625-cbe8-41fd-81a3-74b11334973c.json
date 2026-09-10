@@ -1,0 +1,59 @@
+{
+  "id": "808cf625-cbe8-41fd-81a3-74b11334973c",
+  "skill": "evaluate-skill",
+  "tool": "skills:evaluate-scenarios",
+  "startedAt": "2026-09-10T00:09:15.078Z",
+  "finishedAt": "2026-09-10T00:09:15.079Z",
+  "contextPack": "platform-scenarios",
+  "status": "pass",
+  "warnings": [],
+  "errors": [],
+  "scenarios": 5,
+  "results": [
+    {
+      "id": "basic-routing",
+      "checks": [
+        {
+          "skill": "evaluate-skill",
+          "status": "checked"
+        }
+      ]
+    },
+    {
+      "id": "contract-shape",
+      "checks": [
+        {
+          "skill": "evaluate-skill",
+          "status": "checked"
+        }
+      ]
+    },
+    {
+      "id": "fixture-regression",
+      "checks": [
+        {
+          "skill": "skill-dev/evaluate-skill",
+          "status": "checked"
+        }
+      ]
+    },
+    {
+      "id": "output-format",
+      "checks": [
+        {
+          "skill": "evaluate-skill",
+          "status": "checked"
+        }
+      ]
+    },
+    {
+      "id": "safety-boundary",
+      "checks": [
+        {
+          "skill": "evaluate-skill",
+          "status": "checked"
+        }
+      ]
+    }
+  ]
+}

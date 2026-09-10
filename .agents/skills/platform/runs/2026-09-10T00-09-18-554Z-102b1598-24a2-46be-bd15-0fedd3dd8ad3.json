@@ -1,0 +1,20 @@
+{
+  "id": "102b1598-24a2-46be-bd15-0fedd3dd8ad3",
+  "skill": "skill-audit",
+  "tool": "skills:audit-semantics",
+  "startedAt": "2026-09-10T00:09:18.554Z",
+  "finishedAt": "2026-09-10T00:09:18.555Z",
+  "contextPack": "platform-semantic",
+  "status": "fail",
+  "warnings": [],
+  "errors": [
+    "docs\\agents\\provenance.md contains retired term /\\bask-matt\\b/",
+    "docs\\agents\\provenance.md contains retired term /\\bsetup-matt-pocock-skills\\b/",
+    "docs\\agents\\provenance.md contains retired term /\\bship-review-fix-loop\\b/",
+    "docs\\agents\\provenance.md contains retired term /\\bdoc-draft-pr\\b/",
+    "docs\\agents\\provenance.md contains retired term /\\bfrontend-development\\b/",
+    "docs\\agents\\provenance.md contains retired term /\\bimprove-codebase-architecture\\b/"
+  ],
+  "markdownFiles": 242,
+  "skills": 184
+}
