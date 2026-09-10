@@ -43,6 +43,26 @@ class ParserTest(unittest.TestCase):
         )
         self.assertEqual(rec.qname, "census1.shodan.io")
 
+    def test_parses_chaos_class_query(self):
+        rec = parse_line(
+            "09-Sep-2026 08:10:48.300 queries: info: client @0x7fa2d516fcf0 "
+            "190.102.57.82#18999 (version.server): query: version.server "
+            "CH TXT - (172.19.1.2)",
+            "queries.0",
+        )
+        self.assertEqual(rec.qname, "version.server")
+        self.assertEqual(rec.qtype, "TXT")
+
+    def test_parses_escaped_paren_qname(self):
+        rec = parse_line(
+            "09-Sep-2026 08:01:38.619 queries: info: client @0x7fa2d4985400 "
+            "200.12.213.198#50508 (\\(none\\)): query: \\(none\\) IN AAAA + "
+            "(172.19.1.2)",
+            "queries.0",
+        )
+        self.assertEqual(rec.qname, "(none)")
+        self.assertEqual(rec.qtype, "AAAA")
+
     def test_rejects_garbage(self):
         with self.assertRaises(ParseError):
             parse_line("not a query line", "queries.0")
