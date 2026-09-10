@@ -24,6 +24,7 @@ from typing import Any, Dict, List
 
 from app.common.health import start_health_server
 from app.common.kafka import wait_for_kafka
+from app.emulator.events import SCHEMA_VERSION, TOPIC
 
 logger = logging.getLogger("sentinel.emulator")
 
@@ -33,7 +34,7 @@ logger = logging.getLogger("sentinel.emulator")
 REPLAY_RATE: float = float(os.environ.get("REPLAY_RATE", "20"))
 DEMO_SEED: int = int(os.environ.get("DEMO_SEED", "42"))
 KAFKA_BOOTSTRAP: str = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
-KAFKA_TOPIC: str = os.environ.get("KAFKA_TOPIC", "dns.telemetry.v1")
+KAFKA_TOPIC: str = os.environ.get("KAFKA_TOPIC", TOPIC)
 DATASET_PATH: str = os.environ.get("DATASET_PATH", "/data/queries")
 HEALTH_PORT: int = int(os.environ.get("EMULATOR_HEALTH_PORT", "8080"))
 
@@ -63,6 +64,7 @@ def _generate_synthetic_events(seed: int, count: int = 100) -> List[Dict[str, An
         qname = f"host{i:04d}.example.com."
         events.append({
             "ts": f"2026-09-09T10:{(i // 60):02d}:{(i % 60):02d}.000",
+            "schema_version": SCHEMA_VERSION,
             "client_ip": client_ip,
             "qname": qname,
             "qtype": rng.choice(qtypes),
@@ -117,7 +119,11 @@ def run() -> None:
     for event in events:
         if not _running:
             break
-        producer.send(KAFKA_TOPIC, value=event)
+        producer.send(
+            KAFKA_TOPIC,
+            key=event["client_ip"].encode("utf-8"),
+            value=event,
+        )
         published += 1
         time.sleep(interval)
 

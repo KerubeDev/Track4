@@ -89,6 +89,8 @@ class TestComposeStructure:
 
     REQUIRED_SERVICES = {
         "kafka",
+        "kafka-init",
+        "kafka-probe",
         "clickhouse",
         "grafana",
         "wazuh",
@@ -126,7 +128,7 @@ class TestComposeStructure:
 class TestHealthchecks:
     """V2: All core services have healthchecks for the health gate."""
 
-    SERVICES_WITHOUT_HEALTHCHECK = {"seed-fixtures"}
+    SERVICES_WITHOUT_HEALTHCHECK = {"seed-fixtures", "kafka-init", "kafka-probe"}
 
     def test_core_services_have_healthchecks(self, compose_config: Dict[str, Any]) -> None:
         """Core infrastructure services must have healthchecks."""
@@ -381,7 +383,71 @@ class TestServiceDependencies:
 
 
 # ===========================================================================
-# V8: Compose build contexts
+# V8: Kafka topic provisioning (issue #7)
+# ===========================================================================
+
+class TestKafkaTopicProvisioning:
+    """V8: dns.telemetry.v1 is created explicitly with the accepted layout."""
+
+    def test_kafka_init_mounts_topic_script(self, compose_config):
+        """kafka-init mounts ./kafka:/scripts so init-topics.sh resolves."""
+        volumes = compose_config["services"]["kafka-init"]["volumes"]
+        assert any(
+            vol.startswith("./kafka:") or vol.startswith("./kafka /")
+            for vol in volumes
+        ), f"kafka-init should mount ./kafka:/scripts, got: {volumes}"
+
+    def test_kafka_init_runs_topic_script(self, compose_config):
+        entrypoint = compose_config["services"]["kafka-init"]["entrypoint"]
+        assert any(
+            "init-topics.sh" in str(part) for part in entrypoint
+        ), f"kafka-init should run init-topics.sh, got: {entrypoint}"
+
+    def test_kafka_init_depends_on_kafka_healthy(self, compose_config):
+        deps = compose_config["services"]["kafka-init"].get("depends_on", {})
+        assert "kafka" in deps, "kafka-init should depend on kafka"
+        assert deps["kafka"]["condition"] == "service_healthy"
+
+    def test_kafka_init_has_explicit_partitions_and_retention(self, compose_config):
+        env = compose_config["services"]["kafka-init"]["environment"]
+        assert int(env["KAFKA_TOPIC_PARTITIONS"]) >= 3
+        retention_default = env["KAFKA_TOPIC_RETENTION_MS"]
+        assert "3600000" in retention_default or int(env["KAFKA_TOPIC_RETENTION_MS"]) <= 3_600_000
+
+    @pytest.fixture
+    def init_script(self) -> str:
+        script_path = PROJECT_ROOT / "deploy" / "kafka" / "init-topics.sh"
+        return script_path.read_text()
+
+    def test_init_script_creates_topic_explicitly(self, init_script: str):
+        assert "--create" in init_script
+        assert "--if-not-exists" in init_script
+        assert "--replication-factor 1" in init_script
+
+    def test_init_script_sets_partitions_and_retention(self, init_script: str):
+        assert "--partitions" in init_script
+        assert "retention.ms" in init_script
+        assert "cleanup.policy=delete" in init_script
+
+    def test_init_script_is_executable(self):
+        script_path = PROJECT_ROOT / "deploy" / "kafka" / "init-topics.sh"
+        assert script_path.exists()
+        assert os.access(script_path, os.X_OK)
+
+    def test_kafka_probe_runs_health_module(self, compose_config):
+        command = compose_config["services"]["kafka-probe"]["command"]
+        cmd_str = " ".join(command)
+        assert "app.common.kafka_health" in cmd_str
+        assert "dns.telemetry.v1" in cmd_str
+
+    def test_kafka_probe_depends_on_kafka_init(self, compose_config):
+        deps = compose_config["services"]["kafka-probe"].get("depends_on", {})
+        assert "kafka-init" in deps, "kafka-probe should depend on kafka-init"
+        assert deps["kafka-init"]["condition"] == "service_completed_successfully"
+
+
+# ===========================================================================
+# V9: Compose build contexts
 # ===========================================================================
 
 class TestBuildContexts:

@@ -37,8 +37,6 @@ class SynthesizerTest(unittest.TestCase):
         self.assertEqual(event.zone_id, "BANCO-PA-Z1")
         self.assertEqual(event.rcode, "NOERROR")
         self.assertEqual(event.ground_truth, None)
-        self.assertTrue(event.synthesis)
-        self.assertEqual(event.source, "bind9")
 
     def test_latency_in_plausible_range(self):
         synth = DnstapSynthesizer(random.Random(1))
@@ -76,18 +74,50 @@ class SynthesizerTest(unittest.TestCase):
 
 
 class EventSerializationTest(unittest.TestCase):
+    REQUIRED_FIELDS = {
+        "schema_version",
+        "ts",
+        "client_ip",
+        "qname",
+        "qtype",
+        "rcode",
+        "latency_ms",
+        "zone_id",
+        "pop_id",
+        "ground_truth",
+    }
+
     def test_json_shape(self):
         import json
 
         event = DnstapSynthesizer(random.Random(7)).synthesize(_RECORD, _PROFILE)
         data = json.loads(event.to_json())
         self.assertEqual(data["schema_version"], SCHEMA_VERSION)
-        self.assertEqual(data["timestamp"], "2026-09-09T08:04:59.901Z")
+        self.assertEqual(data["ts"], "2026-09-09T08:04:59.901Z")
         self.assertIn("rcode", data)
         self.assertIn("latency_ms", data)
         self.assertIn("pop_id", data)
         self.assertIn("zone_id", data)
         self.assertIsNone(data["ground_truth"])
+
+    def test_schema_has_exactly_adr_0005_fields(self):
+        event = DnstapSynthesizer(random.Random(7)).synthesize(_RECORD, _PROFILE)
+        fields = set(event.to_dict())
+        self.assertEqual(fields, self.REQUIRED_FIELDS)
+        self.assertNotIn("client_port", fields)
+        self.assertNotIn("resolver_ip", fields)
+        self.assertNotIn("source", fields)
+        self.assertNotIn("synthesis", fields)
+
+    def test_json_round_trip_preserves_fields(self):
+        import json
+
+        event = DnstapSynthesizer(random.Random(7)).synthesize(
+            _RECORD, _PROFILE, ground_truth={"attack": "dga", "episode": "E1"}
+        )
+        restored = json.loads(json.dumps(event.to_dict()))
+        self.assertEqual(restored, event.to_dict())
+        self.assertEqual(restored["ground_truth"], {"attack": "dga", "episode": "E1"})
 
 
 if __name__ == "__main__":

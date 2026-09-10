@@ -58,7 +58,7 @@ class HourReplayX1Test(unittest.TestCase):
         with open(out, "r", encoding="utf-8") as handle:
             events = [json.loads(line) for line in handle if line.strip()]
         self.assertEqual(len(events), _EVENT_COUNT)
-        timestamps = [e["timestamp"] for e in events]
+        timestamps = [e["ts"] for e in events]
         self.assertEqual(timestamps, self.expected)
         self.assertEqual(timestamps, sorted(timestamps))
 
@@ -75,7 +75,7 @@ class HourReplayX1Test(unittest.TestCase):
         self.assertAlmostEqual(sleeper.total, 3600.0, places=4)
         self.assertEqual(stats.first_ts, self.expected[0])
         self.assertEqual(stats.last_ts, self.expected[-1])
-        timestamps = [e.timestamp for e in collector.events]
+        timestamps = [e.ts for e in collector.events]
         self.assertEqual(timestamps, sorted(timestamps))
 
 

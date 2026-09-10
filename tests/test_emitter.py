@@ -87,6 +87,15 @@ class KafkaEmitterTest(unittest.TestCase):
         self.assertEqual(emitter.failed, 0)
         self.assertEqual(fake.produced, 1)
 
+    def test_emit_keys_message_by_client_ip(self):
+        fake = _FakeProducer(None)
+        emitter = _kafka(fake)
+        event = _event()
+        emitter.emit(event)
+        self.assertIsNotNone(fake.last_kwargs)
+        self.assertEqual(fake.last_kwargs["key"], event.client_ip.encode("utf-8"))
+        self.assertEqual(fake.last_kwargs["topic"], TOPIC)
+
     def test_buffer_error_raises_after_retries(self):
         fake = _FakeProducer(None)
         fake.fail = True
@@ -136,11 +145,13 @@ class _FakeProducer:
         self.produced = 0
         self.polls = 0
         self.fail = False
+        self.last_kwargs = None
 
     def produce(self, **kwargs):
         if self.fail:
             raise BufferError("queue full")
         self.produced += 1
+        self.last_kwargs = kwargs
 
     def poll(self, timeout):
         self.polls += 1
