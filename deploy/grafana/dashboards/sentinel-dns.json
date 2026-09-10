@@ -230,7 +230,7 @@
             "type": "grafana-clickhouse-datasource",
             "uid": "sentinel-clickhouse"
           },
-          "rawSql": "SELECT\n  toStartOfInterval(ts, INTERVAL $__interval_ms MILLISECOND) AS time,\n  quantile(0.50)(latency_ms) AS \"p50\",\n  quantile(0.95)(latency_ms) AS \"p95\"\nFROM dns_events_raw\nWHERE\n  $__timeFilter(ts)\n  AND ($zone = 'All' OR zone_id = $zone)\n  AND ($pop = 'All' OR pop_id = $pop)\nGROUP BY time\nORDER BY time",
+          "rawSql": "SELECT\n  toStartOfInterval(ts, INTERVAL 1 Minute) AS time,\n  quantile(0.50)(latency_ms) AS \"p50\",\n  quantile(0.95)(latency_ms) AS \"p95\"\nFROM dns_events_raw\nWHERE\n  $__timeFilter(ts)\n  AND ($zone = 'All' OR zone_id = $zone)\n  AND ($pop = 'All' OR pop_id = $pop)\nGROUP BY time\nORDER BY time",
           "format": "time_series",
           "refId": "A"
         }
@@ -327,7 +327,7 @@
             "type": "grafana-clickhouse-datasource",
             "uid": "sentinel-clickhouse"
           },
-          "rawSql": "SELECT\n  toStartOfInterval(ts, INTERVAL $__interval_ms MILLISECOND) AS time,\n  site AS metric,\n  avg(nxdomain_rate) AS __value\nFROM site_qoe_minute\nWHERE\n  $__timeFilter(ts)\n  AND ($zone = 'All' OR splitByChar('-', site)[1] = $zone)\n  AND ($pop = 'All' OR splitByChar('-', site)[2] = $pop)\nGROUP BY time, site\nORDER BY time",
+          "rawSql": "SELECT\n  toStartOfInterval(ts, INTERVAL 1 Minute) AS time,\n  site AS metric,\n  avg(nxdomain_rate) AS __value\nFROM site_qoe_minute\nWHERE\n  $__timeFilter(ts)\n  AND ($zone = 'All' OR splitByChar('-', site)[1] = $zone)\n  AND ($pop = 'All' OR splitByChar('-', site)[2] = $pop)\nGROUP BY time, site\nORDER BY time",
           "format": "time_series",
           "refId": "A"
         }
@@ -588,7 +588,6 @@
           "type": "grafana-clickhouse-datasource",
           "uid": "sentinel-clickhouse"
         },
-        "definition": "SELECT DISTINCT splitByChar('-', site)[1] AS zone FROM site_qoe_minute ORDER BY zone",
         "hide": 0,
         "includeAll": true,
         "label": "Zone",
@@ -613,7 +612,6 @@
           "type": "grafana-clickhouse-datasource",
           "uid": "sentinel-clickhouse"
         },
-        "definition": "SELECT DISTINCT splitByChar('-', site)[2] AS pop FROM site_qoe_minute WHERE ($zone = 'All' OR splitByChar('-', site)[1] = $zone) ORDER BY pop",
         "hide": 0,
         "includeAll": true,
         "label": "PoP",

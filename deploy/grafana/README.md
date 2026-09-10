@@ -56,6 +56,10 @@ deploy/grafana/
 - **`site_qoe_minute`** — per-minute QoE aggregates (score, label, components, QPS, NXDOMAIN rate). Used by panels P1, P3, P4, P5.
 - **`dns_events_raw`** — raw DNS events. Used by panel P2 (latency percentiles).
 
+## Credentials
+
+Default admin credentials are `admin` / `sentinel` (set in `docker-compose.yml`). These are demo-only defaults for the hackathon. For production, override via environment variables or a `docker-compose.override.yml` file.
+
 ## Datasource
 
 The ClickHouse datasource is provisioned automatically via `provisioning/datasources/clickhouse.yml`:

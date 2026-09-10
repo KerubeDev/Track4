@@ -14,7 +14,6 @@ datasources:
     type: grafana-clickhouse-datasource
     access: proxy
     uid: sentinel-clickhouse
-    url: http://clickhouse:8123
     jsonData:
       defaultDatabase: sentinel_dns
       port: 8123
