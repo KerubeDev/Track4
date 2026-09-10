@@ -27,8 +27,6 @@ BEACON_QUERIES = 15
 BEACON_INTERVAL_S = 20
 BEACON_INTERVALS = 4
 
-_EPISODE_IDS = ("E1", "E2", "E3", "E4", "E5")
-
 # ---------------------------------------------------------------------------
 # Vocabulary
 # ---------------------------------------------------------------------------
@@ -146,6 +144,7 @@ def _beacon_interval_s(window) -> float:
 
 def _episode_events(
     synthesizer: DnstapSynthesizer,
+    mapping: ZoneMapping,
     episode: Episode,
     stamps: list,
     qnames: list,
@@ -153,7 +152,6 @@ def _episode_events(
     qtype: str = "A",
     rcode: str = "NOERROR",
 ):
-    mapping = ZoneMapping.from_csv()
     for stamp, qname, client_ip in zip(stamps, qnames, client_ips):
         profile = mapping.resolve(client_ip)
         yield synthesizer.synthesize_attack(
@@ -188,7 +186,7 @@ def episode_e1_dga(synthesizer, mapping, window, rng):
     owners = [rng.choice(ips) for _ in range(count)]
 
     yield from _episode_events(
-        synthesizer, ATTACK_EPISODES[0], stamps, qnames, owners, rcode="NXDOMAIN"
+        synthesizer, mapping, ATTACK_EPISODES[0], stamps, qnames, owners, rcode="NXDOMAIN"
     )
 
 
@@ -201,7 +199,7 @@ def episode_e2_typosquat(synthesizer, mapping, window, rng):
     ips = _attack_client_ips(rng, 3)
     owners = [rng.choice(ips) for _ in range(count)]
 
-    yield from _episode_events(synthesizer, ATTACK_EPISODES[1], stamps, qnames, owners)
+    yield from _episode_events(synthesizer, mapping, ATTACK_EPISODES[1], stamps, qnames, owners)
 
 
 def _mutate(domain: str, rng: random.Random) -> str:
@@ -242,7 +240,7 @@ def episode_e3_tunnel(synthesizer, mapping, window, rng):
     owners = [tunnel_ip] * count
 
     yield from _episode_events(
-        synthesizer, ATTACK_EPISODES[2], stamps, qnames, owners, qtype="TXT"
+        synthesizer, mapping, ATTACK_EPISODES[2], stamps, qnames, owners, qtype="TXT"
     )
 
 
