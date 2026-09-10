@@ -8,6 +8,8 @@ from app.emulator.replay import Replayer, parse_event_timestamp
 class PlaybackStats:
     events: int
     attack_events: int
+    first_ts: str | None = None
+    last_ts: str | None = None
 
 
 def synthesize_stream(records, mapping, synthesizer):
@@ -49,9 +51,14 @@ class Playback:
         previous = None
         background = 0
         attack = 0
+        first_ts = None
+        last_ts = None
         for event in merged:
             current = parse_event_timestamp(event.timestamp)
             self.replayer.pace(previous, current)
+            if first_ts is None:
+                first_ts = event.timestamp
+            last_ts = event.timestamp
             if event.ground_truth is None:
                 background += 1
             else:
@@ -59,4 +66,9 @@ class Playback:
             emitter.emit(event)
             previous = current
         emitter.flush()
-        return PlaybackStats(events=background + attack, attack_events=attack)
+        return PlaybackStats(
+            events=background + attack,
+            attack_events=attack,
+            first_ts=first_ts,
+            last_ts=last_ts,
+        )
