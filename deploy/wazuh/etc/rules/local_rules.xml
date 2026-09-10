@@ -1,0 +1,65 @@
+<!--
+  local_rules.xml — Sentinel-DNS severity mapping
+  Issue #14 (S2-T4) — Wazuh syslog ingestion
+
+  Rule family IDs 100101–100106 per P3b decision (CONTEXT.md):
+    Verdict      | Confidence | Rule ID | Severity | Level
+    dga          | >= 0.90    | 100101  | 12       | Incident
+    dga          | < 0.90     | 100102  | 9        | Notable event
+    tunnel       | —          | 100103  | 12       | Incident
+    beaconing    | —          | 100104  | 10       | Incident
+    typosquat    | —          | 100105  | 6        | Suspected
+    unverified   | —          | 100106  | 5        | Review
+    benign       | —          | —       | (none)   | no rule emitted
+-->
+<group name="sentinel-dns,">
+  <!-- 100101: DGA with high confidence (>= 0.90) → severity 12 (Incident) -->
+  <rule id="100101" level="12">
+    <decoded_as>sentinel-dns-json</decoded_as>
+    <field name="sentinel.verdict">dga</field>
+    <!-- PCRE2: confidence >= 0.90 (OS_Regex lacks \\d and quantifier support) -->
+    <field name="sentinel.confidence" type="pcre2">^(?:0\.9\d*|1(?:\.0+)?)$</field>
+    <description>Sentinel-DNS: DGA detected — high confidence</description>
+    <group>sentinel-dns-dga</group>
+  </rule>
+
+  <!-- 100102: DGA with lower confidence (< 0.90) → severity 9 (Notable event) -->
+  <rule id="100102" level="9">
+    <decoded_as>sentinel-dns-json</decoded_as>
+    <field name="sentinel.verdict">dga</field>
+    <description>Sentinel-DNS: DGA suspected — lower confidence</description>
+    <group>sentinel-dns-dga</group>
+  </rule>
+
+  <!-- 100103: DNS tunneling → severity 12 (Incident) -->
+  <rule id="100103" level="12">
+    <decoded_as>sentinel-dns-json</decoded_as>
+    <field name="sentinel.verdict">tunnel</field>
+    <description>Sentinel-DNS: DNS tunneling detected</description>
+    <group>sentinel-dns-tunnel</group>
+  </rule>
+
+  <!-- 100104: Beaconing → severity 10 (Incident) -->
+  <rule id="100104" level="10">
+    <decoded_as>sentinel-dns-json</decoded_as>
+    <field name="sentinel.verdict">beaconing</field>
+    <description>Sentinel-DNS: Beaconing pattern detected</description>
+    <group>sentinel-dns-beaconing</group>
+  </rule>
+
+  <!-- 100105: Typosquatting → severity 6 (Suspected) -->
+  <rule id="100105" level="6">
+    <decoded_as>sentinel-dns-json</decoded_as>
+    <field name="sentinel.verdict">typosquat</field>
+    <description>Sentinel-DNS: Typosquatting suspected</description>
+    <group>sentinel-dns-typosquat</group>
+  </rule>
+
+  <!-- 100106: Unverified (QVAC malformed / unavailable) → severity 5 (Review) -->
+  <rule id="100106" level="5">
+    <decoded_as>sentinel-dns-json</decoded_as>
+    <field name="sentinel.verdict">unverified</field>
+    <description>Sentinel-DNS: Unverified alert — QVAC malformed or unavailable</description>
+    <group>sentinel-dns-unverified</group>
+  </rule>
+</group>

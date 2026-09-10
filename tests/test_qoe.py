@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -29,8 +30,8 @@ import yaml
 # Ensure the project root is on the path so we can import app.qoe
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in os.sys.path:
-    os.sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.qoe.config import QoEConfig, NormalizationConfig, LabelThreshold, load_config
 from app.qoe.engine import (
