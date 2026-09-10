@@ -1,0 +1,99 @@
+version: "3.8"
+
+# =============================================================================
+# docker-compose.yml — ClickHouse service for Sentinel-DNS Track4
+# Issue #11 (S2-T1)
+#
+# Usage:
+#   docker compose up -d clickhouse          # start ClickHouse
+#   docker compose run --rm provision        # apply schema (idempotent)
+#   docker compose run --rm seed-fixtures    # insert test data + validate
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # ClickHouse — raw events store + QoE aggregate
+  # ---------------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: sentinel-clickhouse
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native TCP (for future Kafka/Grafana integration)
+    environment:
+      CLICKHOUSE_DB: sentinel_dns
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Provision — idempotent schema creation (run once or after schema changes)
+  # ---------------------------------------------------------------------------
+  provision:
+    image: curlimages/curl:latest
+    container_name: sentinel-provision
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "[provision] Applying schema..."
+        curl -sf http://clickhouse:8123/ \
+          --data-binary @/schema/schema.sql \
+          -H "Content-Type: text/plain"
+        echo ""
+        echo "[provision] Verifying tables..."
+        TABLES=$$(curl -sf http://clickhouse:8123/ \
+          --data "SELECT name FROM system.tables WHERE database = currentDatabase() AND name IN ('dns_events_raw', 'site_qoe_minute') ORDER BY name FORMAT TabSeparated" \
+          -H "Content-Type: text/plain")
+        echo "$$TABLES" | grep -q "dns_events_raw" && echo "[provision] ✓ dns_events_raw" || { echo "[provision] ✗ dns_events_raw MISSING"; exit 1; }
+        echo "$$TABLES" | grep -q "site_qoe_minute" && echo "[provision] ✓ site_qoe_minute" || { echo "[provision] ✗ site_qoe_minute MISSING"; exit 1; }
+        echo "[provision] Done."
+    volumes:
+      - ./clickhouse/schema.sql:/schema/schema.sql:ro
+
+  # ---------------------------------------------------------------------------
+  # Seed fixtures — insert test data and run validation queries
+  # ---------------------------------------------------------------------------
+  seed-fixtures:
+    image: curlimages/curl:latest
+    container_name: sentinel-seed
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "=== Seeding dns_events_raw ==="
+        curl -sf http://clickhouse:8123/ --data-binary @/schema/seed.sql -H "Content-Type: text/plain"
+        echo ""
+        echo "=== Validation: raw events for Z1-POP1 in 1-min window ==="
+        curl -sf http://clickhouse:8123/ \
+          --data "SELECT ts, client_ip, qname, verdict FROM dns_events_raw WHERE ts >= toDateTime64('2026-09-09 10:00:00', 3) AND ts < toDateTime64('2026-09-09 10:01:00', 3) AND zone_id = 'Z1' AND pop_id = 'POP1' ORDER BY ts FORMAT PrettyCompact" \
+          -H "Content-Type: text/plain"
+        echo ""
+        echo "=== Validation: partition pruning (Day 1, Z2-POP3) ==="
+        curl -sf http://clickhouse:8123/ \
+          --data "SELECT ts, client_ip, qname, verdict FROM dns_events_raw WHERE ts >= toDateTime64('2026-09-09 00:00:00', 3) AND ts < toDateTime64('2026-09-10 00:00:00', 3) AND zone_id = 'Z2' AND pop_id = 'POP3' ORDER BY ts FORMAT PrettyCompact" \
+          -H "Content-Type: text/plain"
+        echo ""
+        echo "=== Validation: QoE scores ==="
+        curl -sf http://clickhouse:8123/ \
+          --data "SELECT site, ts, score, label FROM site_qoe_minute ORDER BY site, ts FORMAT PrettyCompact" \
+          -H "Content-Type: text/plain"
+        echo ""
+        echo "=== Seeding complete ==="
+    volumes:
+      - ./clickhouse/schema.sql:/schema/schema.sql:ro
+      - ./clickhouse/seed-fixtures.sh:/schema/seed.sql:ro
+
+volumes:
+  clickhouse-data:
