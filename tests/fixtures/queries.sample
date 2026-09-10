@@ -1,0 +1,6 @@
+09-Sep-2026 08:04:59.901 queries: info: client @0x7fa2c438edf0 190.102.59.241#35082 (www.apple.com): query: www.apple.com IN A + (172.19.1.2)
+09-Sep-2026 08:04:59.912 queries: info: client @0x7fa2c438edf0 190.102.56.90#56836 (census1.shodan.io): query: census1.shodan.io IN A + (172.19.1.2)
+09-Sep-2026 08:04:59.912 queries: info: client @0x7fa2c438edf0 190.102.59.241#58805 (app-measurement.com): query: app-measurement.com IN A + (172.19.1.2)
+09-Sep-2026 08:05:01.024 queries: info: client @0x7fa2c424c580 190.102.59.209#52839 (time.google.com): query: time.google.com IN AAAA +E(0)DV (172.19.1.2)
+09-Sep-2026 08:05:01.031 queries: info: client @0x7fa2d53de710 190.14.197.98#30200 (gue1-spclient.spotify.com): query: gue1-spclient.spotify.com IN TYPE65 + (172.19.1.2)
+09-Sep-2026 08:05:01.044 queries: info: client @0x7fa2d517b690 200.12.213.60#63942 (gs-loc.apple.com): query: gs-loc.apple.com IN HINFO + (172.19.1.2)
