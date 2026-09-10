@@ -65,6 +65,7 @@ class KafkaEmitter(Emitter):
         partitions=3,
         producer_factory=None,
         partition_checker=None,
+        strict_partitions=False,
         **producer_opts,
     ):
         if producer_factory is None:
@@ -76,6 +77,28 @@ class KafkaEmitter(Emitter):
                     "install with `pip install -r requirements-kafka.txt`"
                 ) from exc
             producer_factory = Producer
+
+        checker = partition_checker if partition_checker is not None else _topic_partition_count
+        try:
+            actual = checker(bootstrap_servers, topic)
+        except KafkaPartitionError:
+            if strict_partitions:
+                raise
+            print(
+                f"WARN: topic {topic!r} partition check failed, continuing anyway",
+                file=sys.stderr,
+            )
+            actual = partitions
+        if actual != partitions:
+            if strict_partitions:
+                raise KafkaPartitionError(
+                    f"topic {topic!r} has {actual} partition(s), expected {partitions}"
+                )
+            print(
+                f"WARN: topic {topic!r} has {actual} partition(s), expected {partitions}",
+                file=sys.stderr,
+            )
+
         options = {
             "bootstrap.servers": bootstrap_servers,
             "partitioner": "consistent_random",
@@ -86,12 +109,6 @@ class KafkaEmitter(Emitter):
         self.partitions = partitions
         self.count = 0
         self.failed = 0
-        checker = partition_checker if partition_checker is not None else _topic_partition_count
-        actual = checker(bootstrap_servers, topic)
-        if actual != partitions:
-            raise KafkaPartitionError(
-                f"topic {topic!r} has {actual} partition(s), expected {partitions}"
-            )
 
     def emit(self, event):
         attempts = 0
@@ -108,6 +125,10 @@ class KafkaEmitter(Emitter):
                 attempts += 1
                 if attempts >= MAX_BUFFER_RETRIES:
                     self.failed += 1
+                    print(
+                        f"WARN: dropped event after {MAX_BUFFER_RETRIES} retries",
+                        file=sys.stderr,
+                    )
                     return
                 self._producer.poll(0.5)
 

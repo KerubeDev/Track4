@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime
 
 from app.emulator import parser
-from app.emulator.parser import ParseError, iter_file, parse_line, parse_timestamp
+from app.emulator.parser import ParseError, ParserStats, iter_file, parse_line, parse_timestamp
 
 _FIXTURE = os.path.join(
     os.path.dirname(__file__), "fixtures", "queries.sample"
@@ -82,7 +82,7 @@ class ParserTest(unittest.TestCase):
             self.assertLessEqual(records[i].timestamp, records[i + 1].timestamp)
 
     def test_iter_file_counts_decode_errors(self):
-        parser.bad_decodes = 0
+        stats = ParserStats()
         line = (
             b"09-Sep-2026 08:04:59.901 queries: info: client @0x7fa2c438edf0 "
             b"190.102.59.241#35082 (www\xffapple.com): query: www\xffapple.com "
@@ -92,10 +92,10 @@ class ParserTest(unittest.TestCase):
             path = os.path.join(tmp, "bad.bin")
             with open(path, "wb") as handle:
                 handle.write(line)
-            records = list(iter_file(path, "bad.bin"))
+            records = list(iter_file(path, "bad.bin", stats=stats))
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].qname, "www\ufffdapple.com")
-        self.assertEqual(parser.bad_decodes, 1)
+        self.assertEqual(stats.decode_errors, 1)
 
 
 if __name__ == "__main__":

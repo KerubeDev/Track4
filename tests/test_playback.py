@@ -9,6 +9,8 @@ from app.emulator.playback import Playback, merge_event_streams, synthesize_stre
 from app.emulator.replay import ReplayConfig, Replayer, find_dataset_files, merged_stream
 from app.emulator.synthesizer import DnstapSynthesizer
 
+from tests.helpers import Sleeper
+
 _FIXTURE = "tests/fixtures/queries.sample"
 
 
@@ -21,14 +23,6 @@ class FakeEmitter:
 
     def flush(self):
         pass
-
-
-class _Sleeper:
-    def __init__(self):
-        self.total = 0.0
-
-    def __call__(self, delay):
-        self.total += delay
 
 
 def _records():
@@ -47,7 +41,7 @@ class DatasetOrderingTest(unittest.TestCase):
 
 class ReplayerTest(unittest.TestCase):
     def test_pace_compresses_wall_clock_at_rate_20(self):
-        sleeper = _Sleeper()
+        sleeper = Sleeper()
         replayer = Replayer(ReplayConfig(replay_rate=20.0), sleeper=sleeper)
         replayer.pace(
             datetime(2026, 9, 9, 8, 0, 0, 0),
@@ -56,13 +50,13 @@ class ReplayerTest(unittest.TestCase):
         self.assertAlmostEqual(sleeper.total, 0.05)
 
     def test_pace_rate_one_is_linear(self):
-        sleeper = _Sleeper()
+        sleeper = Sleeper()
         replayer = Replayer(ReplayConfig(replay_rate=1.0), sleeper=sleeper)
         replayer.pace(datetime(2026, 9, 9, 8, 0, 0, 500000), datetime(2026, 9, 9, 8, 0, 0, 700000))
         self.assertAlmostEqual(sleeper.total, 0.2)
 
     def test_no_wait_mode_skips_pacing(self):
-        sleeper = _Sleeper()
+        sleeper = Sleeper()
         replayer = Replayer(ReplayConfig(replay_rate=0.0), sleeper=sleeper)
         replayer.pace(datetime(2026, 9, 9, 8, 0, 0, 0), datetime(2026, 9, 9, 8, 0, 10, 0))
         self.assertEqual(sleeper.total, 0.0)

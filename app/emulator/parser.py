@@ -17,6 +17,11 @@ _UNESCAPE = [(r"\(", "("), (r"\)", ")"), (r"\\", "\\")]
 bad_decodes = 0
 
 
+@dataclass
+class ParserStats:
+    decode_errors: int = 0
+
+
 class ParseError(ValueError):
     pass
 
@@ -55,7 +60,7 @@ def parse_line(line: str, source_file: str) -> QueryRecord:
     )
 
 
-def iter_file(path: str, source_file: str | None = None):
+def iter_file(path: str, source_file: str | None = None, stats: ParserStats | None = None):
     global bad_decodes
     source = source_file or path
     with open(path, "rb") as handle:
@@ -66,6 +71,8 @@ def iter_file(path: str, source_file: str | None = None):
                 line = raw.decode("utf-8")
             except UnicodeDecodeError:
                 bad_decodes += 1
+                if stats is not None:
+                    stats.decode_errors += 1
                 line = raw.decode("utf-8", errors="replace")
             yield parse_line(line, source)
 

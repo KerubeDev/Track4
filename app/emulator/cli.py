@@ -67,11 +67,14 @@ def run(argv=None):
     stream = _limited(background, args.limit)
     stats = playback.run(stream, emitter)
     emitter.close()
+    kafka_failed = ""
+    if args.emit == "kafka" and hasattr(emitter, "failed"):
+        kafka_failed = f" kafka_failed={emitter.failed}"
     print(
         f"replayed={stats.events} attack={stats.attack_events} "
         f"window=({stats.first_ts} .. {stats.last_ts}) "
         f"rate=x{_display_rate(args.rate)} seed={args.seed} emit={args.emit} "
-        f"decode_errs={parser.bad_decodes}"
+        f"decode_errs={parser.bad_decodes}{kafka_failed}"
     )
     return stats
 

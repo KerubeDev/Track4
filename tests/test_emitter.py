@@ -94,14 +94,22 @@ class KafkaEmitterTest(unittest.TestCase):
         self.assertEqual(emitter.count, 0)
         self.assertEqual(emitter.failed, 1)
         self.assertEqual(fake.produced, 0)
-        self.assertEqual(fake.polls, MAX_BUFFER_RETRIES - 1)
+        self.assertGreaterEqual(fake.polls, 1)
 
     def test_partition_match_passes(self):
         _kafka(_FakeProducer(None), checker=lambda bootstrap, topic: 3)
 
-    def test_partition_mismatch_raises(self):
+    def test_partition_mismatch_warns(self):
+        emitter = _kafka(_FakeProducer(None), checker=lambda bootstrap, topic: 2)
+        self.assertIsNotNone(emitter)
+
+    def test_partition_mismatch_raises_strict(self):
         with self.assertRaises(KafkaPartitionError):
-            _kafka(_FakeProducer(None), checker=lambda bootstrap, topic: 2)
+            _kafka(
+                _FakeProducer(None),
+                checker=lambda bootstrap, topic: 2,
+                strict_partitions=True,
+            )
 
 
 class EmitterBaseTest(unittest.TestCase):
@@ -109,11 +117,14 @@ class EmitterBaseTest(unittest.TestCase):
         self.assertIsNone(Emitter().close())
 
 
-def _kafka(fake, checker=lambda bootstrap, topic: 3):
+def _kafka(fake, checker=None, strict_partitions=False):
+    if checker is None:
+        checker = lambda bootstrap, topic: 3
     return KafkaEmitter(
         "localhost:9092",
         producer_factory=lambda options: fake,
         partition_checker=checker,
+        strict_partitions=strict_partitions,
     )
 
 

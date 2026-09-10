@@ -4,6 +4,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from operator import attrgetter
 
 from app.emulator.parser import QueryRecord, iter_file
 
@@ -50,7 +51,7 @@ def heap_merge(iterables, key):
 
 
 def merged_stream(paths):
-    return heap_merge((iter_file(path) for path in paths), key=lambda r: r.timestamp)
+    return heap_merge((iter_file(path) for path in paths), key=attrgetter("timestamp"))
 
 
 class Replayer:

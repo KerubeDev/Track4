@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from operator import attrgetter
 
 from app.emulator.replay import Replayer, heap_merge, parse_event_timestamp
 
@@ -18,7 +19,7 @@ def synthesize_stream(records, mapping, synthesizer):
 
 
 def merge_event_streams(*streams):
-    return heap_merge(streams, key=lambda e: e.timestamp)
+    return heap_merge(streams, key=attrgetter("timestamp"))
 
 
 class Playback:

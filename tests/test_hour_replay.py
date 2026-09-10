@@ -13,15 +13,13 @@ from app.emulator.playback import Playback, synthesize_stream
 from app.emulator.replay import ReplayConfig
 from app.emulator.synthesizer import DnstapSynthesizer
 
+from tests.helpers import Collector, Sleeper, iso
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _HOUR_START = datetime(2026, 9, 9, 8, 0, 0, 0)
 _SPACING = timedelta(seconds=30)
 _EVENT_COUNT = 121
-
-
-def _iso(value):
-    return value.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _write_hour_file(directory):
@@ -38,34 +36,12 @@ def _write_hour_file(directory):
     return path
 
 
-class _Sleeper:
-    def __init__(self):
-        self.total = 0.0
-
-    def __call__(self, delay):
-        self.total += delay
-
-
-class _Collector:
-    def __init__(self):
-        self.events = []
-
-    def emit(self, event):
-        self.events.append(event)
-
-    def flush(self):
-        pass
-
-    def close(self):
-        pass
-
-
 class HourReplayX1Test(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = _write_hour_file(self.tmp.name)
-        self.expected = [_iso(r.timestamp) for r in iter_file(self.path, "queries.0")]
+        self.expected = [iso(r.timestamp) for r in iter_file(self.path, "queries.0")]
 
     def test_cli_replays_hour_with_count_and_logical_order(self):
         out = os.path.join(self.tmp.name, "events.json")
@@ -90,8 +66,8 @@ class HourReplayX1Test(unittest.TestCase):
         mapping = ZoneMapping.from_csv()
         records = iter_file(self.path, "queries.0")
         background = synthesize_stream(records, mapping, DnstapSynthesizer(random.Random(1)))
-        collector = _Collector()
-        sleeper = _Sleeper()
+        collector = Collector()
+        sleeper = Sleeper()
         stats = Playback(ReplayConfig(replay_rate=1.0), sleeper=sleeper).run(
             background, collector
         )
