@@ -38,6 +38,7 @@ class TelemetryEvent:
         pop_id,
         zone_id,
         ground_truth=None,
+        source="bind9",
     ):
         return cls(
             timestamp=_iso8601(timestamp),
@@ -51,6 +52,7 @@ class TelemetryEvent:
             pop_id=pop_id,
             zone_id=zone_id,
             ground_truth=ground_truth,
+            source=source,
         )
 
     def to_dict(self):

@@ -4,6 +4,9 @@ from app.emulator.events import TelemetryEvent
 from app.emulator.mapping import ZoneProfile
 from app.emulator.parser import QueryRecord
 
+# The emulator's own resolver identity for synthesized attack traffic.
+_ATTACK_RESOLVER = "172.19.1.2"
+
 
 class DnstapSynthesizer:
     def __init__(self, rng=None):
@@ -24,6 +27,32 @@ class DnstapSynthesizer:
             pop_id=profile.pop_id,
             zone_id=profile.zone_id,
             ground_truth=ground_truth,
+        )
+
+    def synthesize_attack(
+        self,
+        timestamp,
+        client_ip,
+        qname,
+        profile: ZoneProfile,
+        qtype="A",
+        rcode="NOERROR",
+        ground_truth=None,
+    ):
+        """Build an attack event: scripted rcode, plausible port, attack-sim source."""
+        return TelemetryEvent.new(
+            timestamp=timestamp,
+            client_ip=client_ip,
+            client_port=40000 + self._rng.randrange(20000),
+            qname=qname,
+            qtype=qtype,
+            resolver_ip=_ATTACK_RESOLVER,
+            rcode=rcode,
+            latency_ms=self._latency(profile),
+            pop_id=profile.pop_id,
+            zone_id=profile.zone_id,
+            ground_truth=ground_truth,
+            source="attack-sim",
         )
 
     def _latency(self, profile):
