@@ -4,6 +4,10 @@
 -- Idempotent: all CREATE TABLE statements use IF NOT EXISTS.
 -- =============================================================================
 
+-- Target database (matches CLICKHOUSE_DB in docker-compose.yml).
+CREATE DATABASE IF NOT EXISTS sentinel_dns;
+USE sentinel_dns;
+
 -- ---------------------------------------------------------------------------
 -- dns_events_raw
 -- Raw DNS telemetry event, one row per query.
@@ -47,9 +51,9 @@ CREATE TABLE IF NOT EXISTS dns_events_raw
     -- QVAC confidence score (0.0–1.0). NULL if verdict is NULL.
     confidence      Nullable(Float32),
 
-    -- Which deterministic signal(s) triggered escalation (JSON array string).
-    -- NULL if no signal triggered escalation.
-    signal          Nullable(String)
+    -- Which deterministic signal(s) triggered escalation.
+    -- Empty array [] if no signal triggered escalation.
+    signal          Array(LowCardinality(String)) DEFAULT []
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(ts)

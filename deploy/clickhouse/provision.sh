@@ -18,6 +18,7 @@ set -euo pipefail
 CLICKHOUSE_HOST="${CLICKHOUSE_HOST:-localhost}"
 CLICKHOUSE_PORT="${CLICKHOUSE_PORT:-8123}"
 CLICKHOUSE_URL="http://${CLICKHOUSE_HOST}:${CLICKHOUSE_PORT}"
+CLICKHOUSE_DB="${CLICKHOUSE_DB:-sentinel_dns}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA_FILE="${SCRIPT_DIR}/schema.sql"
 
@@ -40,10 +41,11 @@ done
 # ---------------------------------------------------------------------------
 # Apply schema (idempotent)
 # ---------------------------------------------------------------------------
-echo "[provision] Applying schema from ${SCHEMA_FILE} ..."
+echo "[provision] Applying schema from ${SCHEMA_FILE} to database ${CLICKHOUSE_DB} ..."
 curl -sf "${CLICKHOUSE_URL}/" \
     --data-binary "@${SCHEMA_FILE}" \
-    -H "Content-Type: text/plain"
+    -H "Content-Type: text/plain" \
+    -H "X-ClickHouse-Database: ${CLICKHOUSE_DB}"
 
 echo "[provision] Schema provisioned successfully."
 
@@ -52,8 +54,9 @@ echo "[provision] Schema provisioned successfully."
 # ---------------------------------------------------------------------------
 echo "[provision] Verifying tables ..."
 TABLES=$(curl -sf "${CLICKHOUSE_URL}/" \
-    --data "SELECT name FROM system.tables WHERE database = currentDatabase() AND name IN ('dns_events_raw', 'site_qoe_minute') ORDER BY name FORMAT TabSeparated" \
-    -H "Content-Type: text/plain")
+    --data "SELECT name FROM system.tables WHERE database = '${CLICKHOUSE_DB}' AND name IN ('dns_events_raw', 'site_qoe_minute') ORDER BY name FORMAT TabSeparated" \
+    -H "Content-Type: text/plain" \
+    -H "X-ClickHouse-Database: ${CLICKHOUSE_DB}")
 
 if echo "$TABLES" | grep -q "dns_events_raw"; then
     echo "[provision] ✓ dns_events_raw exists"

@@ -35,6 +35,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # Provision — idempotent schema creation (run once or after schema changes)
+  # Delegates to provision.sh for a single source of truth.
   # ---------------------------------------------------------------------------
   provision:
     image: curlimages/curl:latest
@@ -42,58 +43,39 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: sentinel_dns
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "[provision] Applying schema..."
-        curl -sf http://clickhouse:8123/ \
-          --data-binary @/schema/schema.sql \
-          -H "Content-Type: text/plain"
-        echo ""
-        echo "[provision] Verifying tables..."
-        TABLES=$$(curl -sf http://clickhouse:8123/ \
-          --data "SELECT name FROM system.tables WHERE database = currentDatabase() AND name IN ('dns_events_raw', 'site_qoe_minute') ORDER BY name FORMAT TabSeparated" \
-          -H "Content-Type: text/plain")
-        echo "$$TABLES" | grep -q "dns_events_raw" && echo "[provision] ✓ dns_events_raw" || { echo "[provision] ✗ dns_events_raw MISSING"; exit 1; }
-        echo "$$TABLES" | grep -q "site_qoe_minute" && echo "[provision] ✓ site_qoe_minute" || { echo "[provision] ✗ site_qoe_minute MISSING"; exit 1; }
-        echo "[provision] Done."
+        apk add --no-cache bash >/dev/null 2>&1 || true
+        exec /scripts/provision.sh
     volumes:
-      - ./clickhouse/schema.sql:/schema/schema.sql:ro
+      - ./clickhouse:/scripts:ro
 
   # ---------------------------------------------------------------------------
-  # Seed fixtures — insert test data and run validation queries
+  # Seed fixtures — dev/test only. Run: docker compose --profile dev run --rm seed-fixtures
   # ---------------------------------------------------------------------------
   seed-fixtures:
     image: curlimages/curl:latest
     container_name: sentinel-seed
+    profiles: ["dev"]
     depends_on:
       clickhouse:
         condition: service_healthy
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: sentinel_dns
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "=== Seeding dns_events_raw ==="
-        curl -sf http://clickhouse:8123/ --data-binary @/schema/seed.sql -H "Content-Type: text/plain"
-        echo ""
-        echo "=== Validation: raw events for Z1-POP1 in 1-min window ==="
-        curl -sf http://clickhouse:8123/ \
-          --data "SELECT ts, client_ip, qname, verdict FROM dns_events_raw WHERE ts >= toDateTime64('2026-09-09 10:00:00', 3) AND ts < toDateTime64('2026-09-09 10:01:00', 3) AND zone_id = 'Z1' AND pop_id = 'POP1' ORDER BY ts FORMAT PrettyCompact" \
-          -H "Content-Type: text/plain"
-        echo ""
-        echo "=== Validation: partition pruning (Day 1, Z2-POP3) ==="
-        curl -sf http://clickhouse:8123/ \
-          --data "SELECT ts, client_ip, qname, verdict FROM dns_events_raw WHERE ts >= toDateTime64('2026-09-09 00:00:00', 3) AND ts < toDateTime64('2026-09-10 00:00:00', 3) AND zone_id = 'Z2' AND pop_id = 'POP3' ORDER BY ts FORMAT PrettyCompact" \
-          -H "Content-Type: text/plain"
-        echo ""
-        echo "=== Validation: QoE scores ==="
-        curl -sf http://clickhouse:8123/ \
-          --data "SELECT site, ts, score, label FROM site_qoe_minute ORDER BY site, ts FORMAT PrettyCompact" \
-          -H "Content-Type: text/plain"
-        echo ""
-        echo "=== Seeding complete ==="
+        apk add --no-cache bash >/dev/null 2>&1 || true
+        exec /scripts/seed-fixtures.sh
     volumes:
-      - ./clickhouse/schema.sql:/schema/schema.sql:ro
-      - ./clickhouse/seed-fixtures.sh:/schema/seed.sql:ro
+      - ./clickhouse:/scripts:ro
 
 volumes:
   clickhouse-data:

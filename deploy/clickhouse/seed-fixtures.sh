@@ -12,9 +12,12 @@ set -euo pipefail
 CLICKHOUSE_HOST="${CLICKHOUSE_HOST:-localhost}"
 CLICKHOUSE_PORT="${CLICKHOUSE_PORT:-8123}"
 CLICKHOUSE_URL="http://${CLICKHOUSE_HOST}:${CLICKHOUSE_PORT}"
+CLICKHOUSE_DB="${CLICKHOUSE_DB:-sentinel_dns}"
 
 CH() {
-    curl -sf "${CLICKHOUSE_URL}/" --data-binary "$1" -H "Content-Type: text/plain"
+    curl -sf "${CLICKHOUSE_URL}/" --data-binary "$1" \
+        -H "Content-Type: text/plain" \
+        -H "X-ClickHouse-Database: ${CLICKHOUSE_DB}"
 }
 
 echo "=== Seeding dns_events_raw ==="
@@ -29,12 +32,12 @@ VALUES
     ('2026-09-09 10:00:03.200', '10.0.1.102', 'cdn.microsoft.com.',   'A',      'NOERROR',  15.0,  'Z1', 'POP1', 1, 'benign',     0.92, NULL),
 
     -- Day 1, Site Z2-POP3: suspicious traffic (DGA)
-    ('2026-09-09 10:01:01.000', '10.0.2.50',  'xkjlqwmzpl.info.',     'A',      'NXDOMAIN', 45.2,  'Z2', 'POP3', 1, 'dga',        0.93, '[\"nxdomain_ratio\"]'),
-    ('2026-09-09 10:01:02.000', '10.0.2.51',  'bmvxtkqhgz.net.',      'A',      'NXDOMAIN', 50.1,  'Z2', 'POP3', 1, 'dga',        0.87, '[\"nxdomain_ratio\"]'),
+    ('2026-09-09 10:01:01.000', '10.0.2.50',  'xkjlqwmzpl.info.',     'A',      'NXDOMAIN', 45.2,  'Z2', 'POP3', 1, 'dga',        0.93, ['nxdomain_ratio']),
+    ('2026-09-09 10:01:02.000', '10.0.2.51',  'bmvxtkqhgz.net.',      'A',      'NXDOMAIN', 50.1,  'Z2', 'POP3', 1, 'dga',        0.87, ['nxdomain_ratio']),
     ('2026-09-09 10:01:03.000', '10.0.2.52',  'rfwytpmjkn.org.',      'A',      'NXDOMAIN', 38.7,  'Z2', 'POP3', 1, 'unverified', NULL,  NULL),
 
     -- Day 1, Site Z3-POP2: tunneling
-    ('2026-09-09 10:02:01.000', '10.0.3.10',  'aGVsbG8gd29ybGQ.dg.', 'A',      'NOERROR', 120.0,  'Z3', 'POP2', 1, 'tunnel',     0.91, '[\"entropy\"]'),
+    ('2026-09-09 10:02:01.000', '10.0.3.10',  'aGVsbG8gd29ybGQ.dg.', 'A',      'NOERROR', 120.0,  'Z3', 'POP2', 1, 'tunnel',     0.91, ['entropy']),
 
     -- Day 2: different day to test partitioning
     ('2026-09-10 08:00:01.000', '10.0.1.100', 'mail.example.com.',    'A',      'NOERROR',  10.0,  'Z1', 'POP1', 1, 'benign',     0.99, NULL),
