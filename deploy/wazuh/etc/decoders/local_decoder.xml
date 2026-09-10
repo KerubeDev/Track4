@@ -27,13 +27,13 @@
   <decoder name="sentinel-dns-json">
     <parent>sentinel-dns-json</parent>
     <regex type="pcre2">"verdict"\s*:\s*"(\w+)"</regex>
-    <order>verdict</order>
+    <order>sentinel.verdict</order>
   </decoder>
 
   <!-- Sibling: extract confidence (ordered field 2). -->
   <decoder name="sentinel-dns-json">
     <parent>sentinel-dns-json</parent>
     <regex type="pcre2">"confidence"\s*:\s*(0\.\d+|1(?:\.0+)?)</regex>
-    <order>confidence</order>
+    <order>sentinel.confidence</order>
   </decoder>
 </xml>

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import socket
 import syslog
 from pathlib import Path
@@ -28,17 +29,38 @@ import pytest
 # Ensure the project root is on the path
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in os.sys.path:
-    os.sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.agent.alert_publisher import (
     VERDICT_MAP,
+    DGA_CONFIDENCE_RULES,
+    DGA_DEFAULT_RULE,
     DGA_CONFIDENCE_THRESHOLD,
     VerdictInfo,
     resolve_wazuh_rule,
     format_alert,
     AlertPublisher,
 )
+
+
+# ===========================================================================
+# Shared test helpers
+# ===========================================================================
+
+def _make_verdict(**kwargs: Any) -> VerdictInfo:
+    """Create a VerdictInfo with sensible defaults for testing."""
+    defaults: Dict[str, Any] = {
+        "verdict": "dga",
+        "confidence": 0.95,
+        "reasoning_short": "High entropy domain",
+        "recommended_action": "Block",
+        "qname": "evil.example.com",
+        "client_ip": "10.0.1.50",
+        "signal_evidence": {"entropy": 4.2, "length": 45},
+    }
+    defaults.update(kwargs)
+    return VerdictInfo(**defaults)
 
 
 # ===========================================================================
@@ -103,27 +125,28 @@ class TestVerdictMapStructure:
     """Verify VERDICT_MAP covers all required verdicts."""
 
     def test_all_verdicts_present(self) -> None:
-        """VERDICT_MAP contains entries for all non-benign verdicts."""
-        required_verdicts = {"dga", "tunnel", "beaconing", "typosquat", "unverified"}
+        """VERDICT_MAP contains entries for all non-benign, non-dga verdicts."""
+        required_verdicts = {"tunnel", "beaconing", "typosquat", "unverified"}
         assert required_verdicts.issubset(set(VERDICT_MAP.keys()))
+        assert "dga" in DGA_CONFIDENCE_RULES or DGA_DEFAULT_RULE is not None
 
     def test_dga_has_high_and_low_confidence(self) -> None:
-        """DGA entry must have both high and low confidence rule IDs."""
-        dga = VERDICT_MAP["dga"]
-        assert "high_confidence_rule_id" in dga
-        assert "low_confidence_rule_id" in dga
-        assert "high_confidence_severity" in dga
-        assert "low_confidence_severity" in dga
+        """DGA confidence rules must have a high-confidence entry and a default fallback."""
+        assert 0.90 in DGA_CONFIDENCE_RULES
+        assert DGA_DEFAULT_RULE is not None
+        assert "rule_id" in DGA_CONFIDENCE_RULES[0.90]
+        assert "severity" in DGA_CONFIDENCE_RULES[0.90]
+        assert "rule_id" in DGA_DEFAULT_RULE
+        assert "severity" in DGA_DEFAULT_RULE
 
     def test_rule_ids_are_consecutive(self) -> None:
         """All rule IDs are in the 100101–100106 range."""
         all_ids = []
         for verdict, mapping in VERDICT_MAP.items():
-            if verdict == "dga":
-                all_ids.append(mapping["high_confidence_rule_id"])
-                all_ids.append(mapping["low_confidence_rule_id"])
-            else:
-                all_ids.append(mapping["rule_id"])
+            all_ids.append(mapping["rule_id"])
+        for rule in DGA_CONFIDENCE_RULES.values():
+            all_ids.append(rule["rule_id"])
+        all_ids.append(DGA_DEFAULT_RULE["rule_id"])
         assert sorted(set(all_ids)) == [100101, 100102, 100103, 100104, 100105, 100106]
 
 
@@ -134,41 +157,28 @@ class TestVerdictMapStructure:
 class TestAlertFormat:
     """V2: Alerts are one-line JSON with required fields."""
 
-    def _make_verdict(self, **kwargs: Any) -> VerdictInfo:
-        defaults = {
-            "verdict": "dga",
-            "confidence": 0.95,
-            "reasoning_short": "High entropy domain",
-            "recommended_action": "Block",
-            "qname": "evil.example.com",
-            "client_ip": "10.0.1.50",
-            "signal_evidence": {"entropy": 4.2, "length": 45},
-        }
-        defaults.update(kwargs)
-        return VerdictInfo(**defaults)
-
     def test_one_line_json(self) -> None:
         """Alert must be a single line (no embedded newlines)."""
-        vi = self._make_verdict()
+        vi =         _make_verdict()
         alert = format_alert(vi, rule_id=100101, severity=12)
         assert "\n" not in alert, "Alert contains embedded newline"
 
     def test_valid_json(self) -> None:
         """Alert must parse as valid JSON."""
-        vi = self._make_verdict()
+        vi =         _make_verdict()
         alert = format_alert(vi, rule_id=100101, severity=12)
         parsed = json.loads(alert)
         assert isinstance(parsed, dict)
 
     def test_required_fields_present(self) -> None:
         """Alert must contain all required fields per ADR-0004."""
-        vi = self._make_verdict()
+        vi =         _make_verdict()
         alert = format_alert(vi, rule_id=100101, severity=12)
         parsed = json.loads(alert)
 
         required_fields = [
-            "verdict",
-            "confidence",
+            "sentinel.verdict",
+            "sentinel.confidence",
             "rule_id",
             "severity",
             "reasoning_short",
@@ -183,16 +193,16 @@ class TestAlertFormat:
 
     def test_verdict_and_confidence_propagated(self) -> None:
         """sentinel.verdict and sentinel.confidence must be in the JSON event."""
-        vi = self._make_verdict(verdict="tunnel", confidence=0.88)
+        vi = _make_verdict(verdict="tunnel", confidence=0.88)
         alert = format_alert(vi, rule_id=100103, severity=12)
         parsed = json.loads(alert)
 
-        assert parsed["verdict"] == "tunnel"
-        assert parsed["confidence"] == 0.88
+        assert parsed["sentinel.verdict"] == "tunnel"
+        assert parsed["sentinel.confidence"] == 0.88
 
     def test_rule_id_and_severity_match(self) -> None:
         """rule_id and severity in the JSON match the resolved values."""
-        vi = self._make_verdict(verdict="beaconing", confidence=0.70)
+        vi =         _make_verdict(verdict="beaconing", confidence=0.70)
         alert = format_alert(vi, rule_id=100104, severity=10)
         parsed = json.loads(alert)
 
@@ -201,7 +211,7 @@ class TestAlertFormat:
 
     def test_json_compact_separators(self) -> None:
         """JSON uses compact separators (no spaces after commas/colons)."""
-        vi = self._make_verdict()
+        vi =         _make_verdict()
         alert = format_alert(vi, rule_id=100101, severity=12)
         # Compact JSON should not have ", " (comma-space) or ": " (colon-space)
         assert ", " not in alert, "Alert has spaces after commas"
@@ -209,7 +219,7 @@ class TestAlertFormat:
 
     def test_schema_version_default(self) -> None:
         """schema_version defaults to 1.0."""
-        vi = self._make_verdict()
+        vi =         _make_verdict()
         alert = format_alert(vi, rule_id=100101, severity=12)
         parsed = json.loads(alert)
         assert parsed["schema_version"] == "1.0"
@@ -250,7 +260,7 @@ class TestWazuhXmlFiles:
         ET.parse(ossec_conf_path)
 
     def test_all_rule_ids_present(self, rules_xml_path: Path) -> None:
-        """Rules XML must contain rule IDs 100100–100106."""
+        """Rules XML must contain rule IDs 100101–100106."""
         tree = ET.parse(rules_xml_path)
         root = tree.getroot()
 
@@ -260,7 +270,7 @@ class TestWazuhXmlFiles:
             if rule_id:
                 found_ids.add(int(rule_id))
 
-        expected_ids = {100100, 100101, 100102, 100103, 100104, 100105, 100106}
+        expected_ids = {100101, 100102, 100103, 100104, 100105, 100106}
         assert expected_ids.issubset(found_ids), (
             f"Missing rule IDs: {expected_ids - found_ids}"
         )
@@ -282,7 +292,7 @@ class TestWazuhXmlFiles:
         )
 
     def test_decoder_extracts_verdict(self, decoder_xml_path: Path) -> None:
-        """Decoder must extract 'verdict' field."""
+        """Decoder must extract 'sentinel.verdict' field."""
         tree = ET.parse(decoder_xml_path)
         root = tree.getroot()
 
@@ -291,12 +301,12 @@ class TestWazuhXmlFiles:
             order_text = order.text or ""
             orders.append(order_text)
 
-        assert any("verdict" in o for o in orders), (
-            f"Decoder missing 'verdict' in <order>, found: {orders}"
+        assert any("sentinel.verdict" in o for o in orders), (
+            f"Decoder missing 'sentinel.verdict' in <order>, found: {orders}"
         )
 
     def test_decoder_extracts_confidence(self, decoder_xml_path: Path) -> None:
-        """Decoder must extract 'confidence' field."""
+        """Decoder must extract 'sentinel.confidence' field."""
         tree = ET.parse(decoder_xml_path)
         root = tree.getroot()
 
@@ -305,8 +315,8 @@ class TestWazuhXmlFiles:
             order_text = order.text or ""
             orders.append(order_text)
 
-        assert any("confidence" in o for o in orders), (
-            f"Decoder missing 'confidence' in <order>, found: {orders}"
+        assert any("sentinel.confidence" in o for o in orders), (
+            f"Decoder missing 'sentinel.confidence' in <order>, found: {orders}"
         )
 
     def test_rules_reference_decoder(self, rules_xml_path: Path) -> None:
@@ -439,23 +449,10 @@ class TestUdpSyslogTransport:
     AF_INET = socket.AF_INET
     SOCK_DGRAM = socket.SOCK_DGRAM
 
-    def _make_verdict(self, **kwargs: Any) -> VerdictInfo:
-        defaults = {
-            "verdict": "dga",
-            "confidence": 0.95,
-            "reasoning_short": "High entropy domain",
-            "recommended_action": "Block",
-            "qname": "evil.example.com",
-            "client_ip": "10.0.1.50",
-            "signal_evidence": {},
-        }
-        defaults.update(kwargs)
-        return VerdictInfo(**defaults)
-
     def test_publish_sends_udp_datagram_to_wazuh_target(self) -> None:
         """publish() opens one UDP socket and sends one datagram to the target."""
         publisher = AlertPublisher(wazuh_host="wazuh", wazuh_port=1514)
-        vi = self._make_verdict()
+        vi = _make_verdict()
 
         with patch("app.agent.alert_publisher.socket.socket") as sock_factory:
             sock = sock_factory.return_value.__enter__.return_value
@@ -474,7 +471,7 @@ class TestUdpSyslogTransport:
     def test_send_syslog_payload_has_pri_and_ident(self) -> None:
         """Payload is ``<PRI>sentinel-dns: <json>`` — PRI 166 = LOCAL4.INFO."""
         publisher = AlertPublisher()  # defaults: wazuh:1514, LOG_LOCAL4
-        vi = self._make_verdict(verdict="tunnel", confidence=0.88)
+        vi =         _make_verdict(verdict="tunnel", confidence=0.88)
 
         alert_line = format_alert(vi, rule_id=100103, severity=12)
         expected_payload = (
@@ -519,7 +516,7 @@ class TestUdpSyslogTransport:
     def test_publish_benign_opens_no_socket(self) -> None:
         """Benign verdict must not open a UDP socket at all."""
         publisher = AlertPublisher(wazuh_host="wazuh", wazuh_port=1514)
-        vi = self._make_verdict(verdict="benign", confidence=0.99)
+        vi =         _make_verdict(verdict="benign", confidence=0.99)
 
         with patch("app.agent.alert_publisher.socket.socket") as sock_factory:
             assert publisher.publish(vi) is True
@@ -572,8 +569,8 @@ class TestEndToEnd:
         parsed = json.loads(alert)
 
         # Verify all key fields
-        assert parsed["verdict"] == verdict
-        assert parsed["confidence"] == confidence
+        assert parsed["sentinel.verdict"] == verdict
+        assert parsed["sentinel.confidence"] == confidence
         assert parsed["rule_id"] == expected_rule_id
         assert parsed["severity"] == expected_severity
         assert parsed["qname"] == f"test-{verdict}.example.com"

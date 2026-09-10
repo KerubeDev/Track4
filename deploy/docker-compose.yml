@@ -118,9 +118,10 @@ services:
       - "55000:55000"   # Wazuh API (for dashboard integration)
     environment:
       INDEXER_URL: "https://wazuh-indexer:9200"
-      INDEXER_USERNAME: admin
-      INDEXER_PASSWORD: admin
-      FILEBEAT_BOOTSTRAP: "no"
+      # Demo-only defaults — override via .env in production
+      INDEXER_USERNAME: ${INDEXER_USERNAME:-admin}
+      INDEXER_PASSWORD: ${INDEXER_PASSWORD:-admin}
+      FILEBEAT_BOOTSTRAP: "no"  # No indexer service in this compose file
     volumes:
       - ./wazuh/etc/ossec.conf:/var/ossec/etc/ossec.conf:ro
       - ./wazuh/etc/decoders/local_decoder.xml:/var/ossec/etc/decoders/local_decoder.xml:ro

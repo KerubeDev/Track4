@@ -19,7 +19,7 @@ import json
 import logging
 import socket
 import syslog
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -27,21 +27,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Verdict → Wazuh rule ID + severity mapping (P3b / ADR-0004)
 # ---------------------------------------------------------------------------
+# Confidence threshold for DGA high vs low confidence split
+DGA_CONFIDENCE_THRESHOLD = 0.90
+
+# Confidence-keyed rules for DGA (threshold → rule).
+DGA_CONFIDENCE_RULES: Dict[float, Dict[str, Any]] = {
+    0.90: {"rule_id": 100101, "severity": 12},
+}
+# DGA default rule when no confidence threshold is met.
+DGA_DEFAULT_RULE: Dict[str, Any] = {"rule_id": 100102, "severity": 9}
+
 VERDICT_MAP: Dict[str, Dict[str, Any]] = {
-    "dga": {
-        "high_confidence_rule_id": 100101,
-        "high_confidence_severity": 12,
-        "low_confidence_rule_id": 100102,
-        "low_confidence_severity": 9,
-    },
     "tunnel": {"rule_id": 100103, "severity": 12},
     "beaconing": {"rule_id": 100104, "severity": 10},
     "typosquat": {"rule_id": 100105, "severity": 6},
     "unverified": {"rule_id": 100106, "severity": 5},
 }
-
-# Confidence threshold for DGA high vs low confidence split
-DGA_CONFIDENCE_THRESHOLD = 0.90
 
 
 @dataclass(frozen=True)
@@ -54,11 +55,7 @@ class VerdictInfo:
     recommended_action: str = ""
     qname: str = ""
     client_ip: str = ""
-    signal_evidence: Dict[str, Any] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.signal_evidence is None:
-            object.__setattr__(self, "signal_evidence", {})
+    signal_evidence: Dict[str, Any] = field(default_factory=dict)
 
 
 def resolve_wazuh_rule(verdict: str, confidence: float) -> Optional[Dict[str, Any]]:
@@ -78,21 +75,16 @@ def resolve_wazuh_rule(verdict: str, confidence: float) -> Optional[Dict[str, An
     if verdict == "benign":
         return None
 
+    if verdict == "dga":
+        for threshold in sorted(DGA_CONFIDENCE_RULES):
+            if confidence >= threshold:
+                return DGA_CONFIDENCE_RULES[threshold]
+        return DGA_DEFAULT_RULE
+
     mapping = VERDICT_MAP.get(verdict)
     if mapping is None:
         # Unknown verdict → unverified (ADR-0002 degradation)
         return {"rule_id": 100106, "severity": 5}
-
-    if verdict == "dga":
-        if confidence >= DGA_CONFIDENCE_THRESHOLD:
-            return {
-                "rule_id": mapping["high_confidence_rule_id"],
-                "severity": mapping["high_confidence_severity"],
-            }
-        return {
-            "rule_id": mapping["low_confidence_rule_id"],
-            "severity": mapping["low_confidence_severity"],
-        }
 
     return {"rule_id": mapping["rule_id"], "severity": mapping["severity"]}
 
@@ -110,8 +102,8 @@ def format_alert(
     Wazuh's decoder can parse via ``sentinel-dns`` program name.
 
     Required fields per ADR-0004:
-      - ``verdict``: the threat classification
-      - ``confidence``: model confidence (0.0–1.0)
+      - ``sentinel.verdict``: the threat classification
+      - ``sentinel.confidence``: model confidence (0.0–1.0)
       - ``rule_id``: the Wazuh rule ID
       - ``severity``: the Wazuh severity level
 
@@ -123,8 +115,8 @@ def format_alert(
     """
     event = {
         "schema_version": schema_version,
-        "verdict": verdict_info.verdict,
-        "confidence": verdict_info.confidence,
+        "sentinel.verdict": verdict_info.verdict,
+        "sentinel.confidence": verdict_info.confidence,
         "rule_id": rule_id,
         "severity": severity,
         "reasoning_short": verdict_info.reasoning_short,
