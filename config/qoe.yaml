@@ -1,0 +1,73 @@
+# =============================================================================
+# qoe.yaml — Quality-of-Experience scoring configuration
+# Issue #12 (S2-T2) — Sentinel-DNS Track4
+#
+# Per-site, per-minute QoE score (0–100, higher = better).
+# Formula: score = W_lat * latency + W_nx * nxdomain + W_sat * saturation
+#
+# All weights, thresholds, and normalization formulas are defined here.
+# Changing this file relabels scores without code changes (validation: V2).
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Component weights (must sum to 1.0)
+# ---------------------------------------------------------------------------
+# Justification: latency is the primary user-perceived metric (45%) per ADR-0006.
+# NXDOMAIN indicates resolution failure, the second most impactful (35%).
+# Saturation measures load pressure, least visible to end users (20%).
+weights:
+  latency:     0.45
+  nxdomain:    0.35
+  saturation:  0.20
+
+# ---------------------------------------------------------------------------
+# Normalization: each component is scaled to 0–100, higher = better
+# ---------------------------------------------------------------------------
+normalization:
+  # latency: 100 - p95(latency_ms) * 100 / max_latency_ms
+  # Baseline anchor: max_latency_ms = 300 ms. P95 above 300 ms → score 0.
+  # Justification: p99 of real dataset labels is 36 chars; CDN/NTT latency
+  #   spikes above 300 ms indicate severe degradation in Ovnicom's PoPs.
+  latency:
+    max_latency_ms: 300
+
+  # nxdomain: 100 * (1 - min(nx_rate, 0.5) / 0.5)
+  # Clamp: nx_rate ≥ 0.5 → score 0 (half or more NX = total failure).
+  # Justification: signal 1 escalation fires at ratio ≥ 0.6; the 0.5 clamp
+  #   ensures the component bottoms out before escalation triggers.
+  nxdomain:
+    clamp_rate: 0.5
+
+  # saturation: 100 * (1 - min(qps / (2 * baseline_qps), 1))
+  # Baseline per zone from zone_mapping.csv; 2x baseline → score 0.
+  # Justification: 2x baseline is a generous ceiling; real PoP capacity
+  #   constraints make 2x a realistic overload boundary.
+  saturation:
+    overflow_multiplier: 2.0
+
+# ---------------------------------------------------------------------------
+# Human-readable labels
+# ---------------------------------------------------------------------------
+# Justification: 85/70/50 thresholds from P2b decision; operator tuning
+#   confirmed during grilling session two.
+labels:
+  excellent:
+    min_score: 85
+  good:
+    min_score: 70
+  fair:
+    min_score: 50
+  poor:
+    min_score: 0
+
+# ---------------------------------------------------------------------------
+# Baseline anchors (static, from zone_mapping.csv latency profiles)
+# ---------------------------------------------------------------------------
+# The zone_mapping.csv file provides per-site baseline_qps (normal traffic
+# volume) and baseline_p95_latency_ms. These are stable by design — derived
+# from the emulator synthesis, never from live logs (per ADR-0006).
+#
+# If zone_mapping.csv is missing, the engine uses these defaults.
+defaults:
+  baseline_qps: 10.0
+  baseline_p95_latency_ms: 50.0

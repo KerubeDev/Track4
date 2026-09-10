@@ -7,3 +7,6 @@ docs/data/LogsDNSQueries\ 2/
 
 # Local ClickHouse dev data (managed by chctl).
 .clickhouse/
+
+# Python bytecode cache.
+__pycache__/
