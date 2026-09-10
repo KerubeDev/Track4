@@ -86,6 +86,36 @@ def test_fake_transport_never_touches_real_http_transport():
     assert len(calls) == 1
 
 
+def test_injected_transport_never_reaches_urlopen():
+    calls = []
+
+    def transport(*_):
+        calls.append(1)
+        return response()
+
+    with patch(
+        "app.agent.qvac_adapter.request.urlopen",
+        side_effect=AssertionError("network egress attempted"),
+    ):
+        result = QVACAdapter(transport=transport).infer("x.example", {})
+    assert result.verdict == "dga"
+    assert len(calls) == 1
+
+
+def test_http_transport_refuses_non_loopback_endpoint():
+    urlopen_calls = []
+
+    def fail_urlopen(*_a, **_k):
+        urlopen_calls.append(1)
+        raise AssertionError("network egress attempted")
+
+    with patch("app.agent.qvac_adapter.request.urlopen", side_effect=fail_urlopen):
+        result = QVACAdapter("http://evil.example:11434", retries=1).infer("x", {})
+    assert result.verdict == "unverified"
+    assert urlopen_calls == []
+    assert "endpoint refused" in result.error
+
+
 @pytest.mark.skipif(
     os.environ.get("QVAC_LIVE_SMOKE") != "1",
     reason="live QVAC smoke requires QVAC_LIVE_SMOKE=1 and a reachable local QVAC service",
@@ -106,4 +136,8 @@ def test_live_qvac_smoke_known_dga_and_benign():
         pytest.skip("local QVAC service unavailable")
     assert dga.verdict == "dga"
     assert dga.confidence >= 0.7
+    assert dga.reasoning_short
+    assert dga.recommended_action
     assert benign.verdict == "benign"
+    assert benign.reasoning_short
+    assert benign.recommended_action

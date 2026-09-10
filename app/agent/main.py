@@ -133,6 +133,7 @@ def run() -> None:
                     confidence=alert["confidence"],
                     reasoning_short=alert.get("reasoning_short", ""),
                     recommended_action=alert.get("recommended_action", ""),
+                    signal_evidence=alert.get("signal_evidence", {}),
                     qname=alert.get("qname", ""),
                     client_ip=alert.get("client_ip", ""),
                 )

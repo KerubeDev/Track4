@@ -7,7 +7,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
-from urllib import request
+from urllib import parse, request
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,12 @@ class QVACAdapter:
 
     @staticmethod
     def _http_transport(url: str, body: bytes, timeout: float) -> bytes:
+        _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+        host = parse.urlparse(url).hostname
+        if host not in _LOOPBACK_HOSTS:
+            raise ValueError(f"non-loopback QVAC endpoint refused: {host}")
         req = request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-        with request.urlopen(req, timeout=timeout) as response:  # nosec B310: URL is operator-configured
+        with request.urlopen(req, timeout=timeout) as response:  # nosec B310: refused non-loopback above
             return response.read()
 
     def _unverified(self, started: float, error: str, evidence: dict[str, Any]) -> QVACVerdict:
