@@ -1,0 +1,8 @@
+# =============================================================================
+# requirements.txt — Python dependencies for Sentinel-DNS services
+# Issue #15 (S2-T5) — Docker compose + idempotent provision
+#
+# Shared by emulator, agent, and qoe services.
+# =============================================================================
+
+pyyaml>=6.0,<7.0

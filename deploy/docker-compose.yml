@@ -1,16 +1,57 @@
-version: "3.8"
-
 # =============================================================================
-# docker-compose.yml — ClickHouse + Grafana + Wazuh services for Sentinel-DNS Track4
-# Issues #11 (S2-T1), #13 (S2-T3), #14 (S2-T4)
+# docker-compose.yml — Full Sentinel-DNS stack
+# Issue #15 (S2-T5) — Docker compose + idempotent provision
+#
+# Single `docker compose up` starts the full stack:
+#   qvac, kafka (KRaft), emulator, agent, wazuh, clickhouse, grafana
 #
 # Usage:
-#   docker compose up -d clickhouse grafana  # start ClickHouse + Grafana
-#   docker compose run --rm provision        # apply schema (idempotent)
-#   docker compose run --rm seed-fixtures    # insert test data + validate
+#   docker compose up -d                          # start the full stack
+#   docker compose run --rm provision             # idempotent provision
+#   docker compose ps                             # check health gate
+#   docker compose create --profile dev           # dev-only seed fixtures
+#
+# Configuration via .env (REPLAY_RATE, DEMO_SEED, etc.)
 # =============================================================================
 
 services:
+  # ---------------------------------------------------------------------------
+  # Kafka (KRaft mode — no Zookeeper)
+  # Single-broker cluster for the demo; topic auto-created on first produce.
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: sentinel-kafka
+    environment:
+      # KRaft mode configuration
+      KAFKA_CFG_NODE_ID: "${KAFKA_BROKER_ID:-1}"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:${KAFKA_CONTROLLER_PORT:-9093}"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      # Listeners
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:${KAFKA_PORT:-9092},CONTROLLER://:${KAFKA_CONTROLLER_PORT:-9093}"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:${KAFKA_PORT:-9092}"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      # Topic defaults
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_NUM_PARTITIONS: "3"
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_RETENTION_MS: "3600000"
+      # Cluster ID for KRaft
+      KAFKA_CFG_CLUSTER_ID: "${KAFKA_CLUSTER_ID:-multiline-sentinel-dns-cluster}"
+    ports:
+      - "${KAFKA_PORT:-9092}:${KAFKA_PORT:-9092}"
+    volumes:
+      - kafka-data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:${KAFKA_PORT:-9092} --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
   # ---------------------------------------------------------------------------
   # ClickHouse — raw events store + QoE aggregate
   # ---------------------------------------------------------------------------
@@ -18,10 +59,10 @@ services:
     image: clickhouse/clickhouse-server:24.3-alpine
     container_name: sentinel-clickhouse
     ports:
-      - "8123:8123"   # HTTP interface
-      - "9000:9000"   # Native TCP (for future Kafka/Grafana integration)
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
     environment:
-      CLICKHOUSE_DB: sentinel_dns
+      CLICKHOUSE_DB: "${CLICKHOUSE_DB:-sentinel_dns}"
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - clickhouse-data:/var/lib/clickhouse
@@ -34,52 +75,7 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Provision — idempotent schema creation (run once or after schema changes)
-  # Delegates to provision.sh for a single source of truth.
-  # ---------------------------------------------------------------------------
-  provision:
-    image: curlimages/curl:latest
-    container_name: sentinel-provision
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-    environment:
-      CLICKHOUSE_HOST: clickhouse
-      CLICKHOUSE_PORT: "8123"
-      CLICKHOUSE_DB: sentinel_dns
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        apk add --no-cache bash >/dev/null 2>&1 || true
-        exec /scripts/provision.sh
-    volumes:
-      - ./clickhouse:/scripts:ro
-
-  # ---------------------------------------------------------------------------
-  # Seed fixtures — dev/test only. Run: docker compose --profile dev run --rm seed-fixtures
-  # ---------------------------------------------------------------------------
-  seed-fixtures:
-    image: curlimages/curl:latest
-    container_name: sentinel-seed
-    profiles: ["dev"]
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-    environment:
-      CLICKHOUSE_HOST: clickhouse
-      CLICKHOUSE_PORT: "8123"
-      CLICKHOUSE_DB: sentinel_dns
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        apk add --no-cache bash >/dev/null 2>&1 || true
-        exec /scripts/seed-fixtures.sh
-    volumes:
-      - ./clickhouse:/scripts:ro
-
-  # ---------------------------------------------------------------------------
   # Grafana — provisioned dashboard for QoE monitoring
-  # Issue #13 (S2-T3) — five panels: QoE, latency, NXDOMAIN, saturation, culprit
   # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:11.1.0
@@ -88,8 +84,8 @@ services:
       - "3000:3000"
     environment:
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: sentinel
+      GF_SECURITY_ADMIN_USER: "${GF_SECURITY_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GF_SECURITY_ADMIN_PASSWORD:-sentinel}"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/sentinel-dns.json
     volumes:
       - grafana-data:/var/lib/grafana
@@ -107,21 +103,19 @@ services:
 
   # ---------------------------------------------------------------------------
   # Wazuh — SIEM for sentinel-dns alerts
-  # Issue #14 (S2-T4) — syslog ingestion, JSON decoder, rules 100101–100106
   # ---------------------------------------------------------------------------
   wazuh:
     image: wazuh/wazuh-manager:4.9.2
     container_name: sentinel-wazuh
     hostname: wazuh
     ports:
-      - "1514:1514/udp"  # Remote syslog for sentinel-dns alerts
-      - "55000:55000"   # Wazuh API (for dashboard integration)
+      - "1514:1514/udp"
+      - "55000:55000"
     environment:
       INDEXER_URL: "https://wazuh-indexer:9200"
-      # Demo-only defaults — override via .env in production
-      INDEXER_USERNAME: ${INDEXER_USERNAME:-admin}
-      INDEXER_PASSWORD: ${INDEXER_PASSWORD:-admin}
-      FILEBEAT_BOOTSTRAP: "no"  # No indexer service in this compose file
+      INDEXER_USERNAME: "${INDEXER_USERNAME:-admin}"
+      INDEXER_PASSWORD: "${INDEXER_PASSWORD:-admin}"
+      FILEBEAT_BOOTSTRAP: "no"
     volumes:
       - ./wazuh/etc/ossec.conf:/var/ossec/etc/ossec.conf:ro
       - ./wazuh/etc/decoders/local_decoder.xml:/var/ossec/etc/decoders/local_decoder.xml:ro
@@ -135,7 +129,145 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # QVAC stub — mock AI inference for demo mode
+  # Returns mock verdicts so the pipeline runs end-to-end.
+  # Replace with real QVAC adapter in issue #9 (S1-T5).
+  # ---------------------------------------------------------------------------
+  qvac:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python-base
+    container_name: sentinel-qvac
+    command: ["python", "-m", "app.qvac.server"]
+    environment:
+      QVAC_PORT: "${QVAC_PORT:-11434}"
+    ports:
+      - "${QVAC_PORT:-11434}:${QVAC_PORT:-11434}"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${QVAC_PORT:-11434}/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Emulator — replays DNS telemetry into Kafka
+  # Stub: generates synthetic events. Full implementation in issue #5 (S1-T1).
+  # ---------------------------------------------------------------------------
+  emulator:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python-base
+    container_name: sentinel-emulator
+    command: ["python", "-m", "app.emulator.main"]
+    environment:
+      REPLAY_RATE: "${REPLAY_RATE:-20}"
+      DEMO_SEED: "${DEMO_SEED:-42}"
+      KAFKA_BOOTSTRAP: "kafka:${KAFKA_PORT:-9092}"
+      KAFKA_TOPIC: "dns.telemetry.v1"
+      DATASET_PATH: "/data/queries"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${EMULATOR_HEALTH_PORT:-8080}/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Agent — consumes Kafka events, runs filter, alerts to Wazuh
+  # Stub: basic NXDOMAIN detection. Full filter in issue #8 (S1-T4).
+  # ---------------------------------------------------------------------------
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.python-base
+    container_name: sentinel-agent
+    command: ["python", "-m", "app.agent.main"]
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:${KAFKA_PORT:-9092}"
+      KAFKA_TOPIC: "dns.telemetry.v1"
+      KAFKA_GROUP: "sentinel-agent"
+      CLICKHOUSE_HOST: "clickhouse"
+      CLICKHOUSE_PORT: "${CLICKHOUSE_HTTP_PORT:-8123}"
+      CLICKHOUSE_DB: "${CLICKHOUSE_DB:-sentinel_dns}"
+      QVAC_URL: "http://qvac:${QVAC_PORT:-11434}"
+      WAZUH_HOST: "wazuh"
+      WAZUH_PORT: "1514"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      qvac:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${AGENT_HEALTH_PORT:-8081}/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Provision — idempotent full-stack provisioning
+  # Creates ClickHouse tables, verifies Grafana datasource/dashboard,
+  # and confirms Wazuh rules/decoder. Safe to run multiple times.
+  # ---------------------------------------------------------------------------
+  provision:
+    image: curlimages/curl:latest
+    container_name: sentinel-provision
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: "${CLICKHOUSE_DB:-sentinel_dns}"
+      GRAFANA_HOST: grafana
+      GRAFANA_PORT: "3000"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache bash >/dev/null 2>&1 || true
+        exec /scripts/provision-full.sh
+    healthcheck:
+      test: ["CMD", "test", "-f", "/scripts/provision-full.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 1
+    volumes:
+      - ./clickhouse:/scripts:ro
+
+  # ---------------------------------------------------------------------------
+  # Seed fixtures — dev/test only
+  # ---------------------------------------------------------------------------
+  seed-fixtures:
+    image: curlimages/curl:latest
+    container_name: sentinel-seed
+    profiles: ["dev"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: "${CLICKHOUSE_DB:-sentinel_dns}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache bash >/dev/null 2>&1 || true
+        exec /scripts/seed-fixtures.sh
+    volumes:
+      - ./clickhouse:/scripts:ro
+
 volumes:
   clickhouse-data:
   grafana-data:
   wazuh-data:
+  kafka-data:
