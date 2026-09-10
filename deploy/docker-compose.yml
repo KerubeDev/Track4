@@ -1,0 +1,110 @@
+version: "3.8"
+
+# =============================================================================
+# docker-compose.yml — ClickHouse + Grafana services for Sentinel-DNS Track4
+# Issues #11 (S2-T1), #13 (S2-T3)
+#
+# Usage:
+#   docker compose up -d clickhouse grafana  # start ClickHouse + Grafana
+#   docker compose run --rm provision        # apply schema (idempotent)
+#   docker compose run --rm seed-fixtures    # insert test data + validate
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # ClickHouse — raw events store + QoE aggregate
+  # ---------------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: sentinel-clickhouse
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native TCP (for future Kafka/Grafana integration)
+    environment:
+      CLICKHOUSE_DB: sentinel_dns
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Provision — idempotent schema creation (run once or after schema changes)
+  # Delegates to provision.sh for a single source of truth.
+  # ---------------------------------------------------------------------------
+  provision:
+    image: curlimages/curl:latest
+    container_name: sentinel-provision
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: sentinel_dns
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache bash >/dev/null 2>&1 || true
+        exec /scripts/provision.sh
+    volumes:
+      - ./clickhouse:/scripts:ro
+
+  # ---------------------------------------------------------------------------
+  # Seed fixtures — dev/test only. Run: docker compose --profile dev run --rm seed-fixtures
+  # ---------------------------------------------------------------------------
+  seed-fixtures:
+    image: curlimages/curl:latest
+    container_name: sentinel-seed
+    profiles: ["dev"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: sentinel_dns
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache bash >/dev/null 2>&1 || true
+        exec /scripts/seed-fixtures.sh
+    volumes:
+      - ./clickhouse:/scripts:ro
+
+  # ---------------------------------------------------------------------------
+  # Grafana — provisioned dashboard for QoE monitoring
+  # Issue #13 (S2-T3) — five panels: QoE, latency, NXDOMAIN, saturation, culprit
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: sentinel-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: sentinel
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/sentinel-dns.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  clickhouse-data:
+  grafana-data:
