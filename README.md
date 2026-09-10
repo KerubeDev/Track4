@@ -28,8 +28,8 @@ In compliance with the Terms and Conditions, the following pre-existing bases we
 
 The zone-to-PoP mapping tables and latency profiles are fictional data generated for the demo (four clients,
 six PoPs), and the dnstap layer (rcode, latency, zone identity) is **synthesized by the emulator** because the
-challenge dataset is a BIND9 log without those fields. Every published event therefore carries
-`synthesis: true` and `source: "bind9"` so the jury can separate real from synthesized fields (ADR-0005).
+challenge dataset is a BIND9 log without those fields. Provenance is preserved for the jury through the event
+`schema_version`, the attack-episode `ground_truth` marker, and the versioned mapping configuration (ADR-0005).
 All reasoning and the substantial product were built within the competition window.
 
 ## Workflow quirk
