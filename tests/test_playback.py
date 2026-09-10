@@ -73,7 +73,7 @@ class PlaybackTest(unittest.TestCase):
         stats = Playback(ReplayConfig(replay_rate=0.0)).run(background, emitter)
         self.assertEqual(stats.events, 6)
         self.assertEqual(stats.attack_events, 0)
-        timestamps = [e.timestamp for e in emitter.events]
+        timestamps = [e.ts for e in emitter.events]
         self.assertEqual(timestamps, sorted(timestamps))
 
     def test_playback_merges_attack_stream(self):
@@ -88,7 +88,7 @@ class PlaybackTest(unittest.TestCase):
         labeled = [e for e in emitter.events if e.ground_truth is not None]
         self.assertEqual(len(labeled), 1)
         self.assertEqual(labeled[0].ground_truth["episode"], "E1")
-        timestamps = [e.timestamp for e in emitter.events]
+        timestamps = [e.ts for e in emitter.events]
         self.assertEqual(timestamps, sorted(timestamps))
 
     def test_merge_event_streams_keeps_chronological_order(self):
@@ -98,17 +98,15 @@ class PlaybackTest(unittest.TestCase):
         merged = list(merge_event_streams(background, iter(attack)))
         self.assertEqual(len(merged), 3)
         for i in range(len(merged) - 1):
-            self.assertLessEqual(merged[i].timestamp, merged[i + 1].timestamp)
+            self.assertLessEqual(merged[i].ts, merged[i + 1].ts)
 
 
 def _mk_attack(timestamp):
     return TelemetryEvent(
-        timestamp=timestamp,
+        ts=timestamp,
         client_ip="10.99.50.97",
-        client_port=1,
         qname="evil.example",
         qtype="A",
-        resolver_ip="172.19.1.2",
         rcode="NOERROR",
         latency_ms=1.0,
         pop_id="PAN-PAC-01",

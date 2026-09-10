@@ -39,7 +39,7 @@ def _events(generator):
 
 
 def _stamps(events):
-    return [datetime.strptime(e.timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") for e in events]
+    return [datetime.strptime(e.ts, "%Y-%m-%dT%H:%M:%S.%fZ") for e in events]
 
 
 class AttackModuleTest(unittest.TestCase):
@@ -217,11 +217,6 @@ class BuildAttackStreamTest(unittest.TestCase):
             self.assertIsNotNone(event.ground_truth)
             self.assertIn("attack", event.ground_truth)
             self.assertIn("episode", event.ground_truth)
-
-    def test_all_events_marked_attack_sim_source(self):
-        for event in self.events:
-            self.assertEqual(event.source, "attack-sim")
-            self.assertTrue(event.synthesis)
 
     def test_events_inside_replayed_logical_window(self):
         window = (WINDOW[0] - timedelta(milliseconds=50), WINDOW[1])

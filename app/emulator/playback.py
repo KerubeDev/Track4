@@ -19,7 +19,7 @@ def synthesize_stream(records, mapping, synthesizer):
 
 
 def merge_event_streams(*streams):
-    return heap_merge(streams, key=attrgetter("timestamp"))
+    return heap_merge(streams, key=attrgetter("ts"))
 
 
 class Playback:
@@ -39,11 +39,11 @@ class Playback:
         first_ts = None
         last_ts = None
         for event in merged:
-            current = parse_event_timestamp(event.timestamp)
+            current = parse_event_timestamp(event.ts)
             self.replayer.pace(previous, current)
             if first_ts is None:
-                first_ts = event.timestamp
-            last_ts = event.timestamp
+                first_ts = event.ts
+            last_ts = event.ts
             if event.ground_truth is None:
                 background += 1
             else:

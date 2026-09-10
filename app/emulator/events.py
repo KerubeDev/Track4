@@ -9,50 +9,40 @@ TOPIC = "dns.telemetry.v1"
 
 @dataclass(frozen=True)
 class TelemetryEvent:
-    timestamp: str
+    ts: str
     client_ip: str
-    client_port: int
     qname: str
     qtype: str
-    resolver_ip: str
     rcode: str
     latency_ms: float
     pop_id: str
     zone_id: str
     schema_version: int = SCHEMA_VERSION
     ground_truth: Optional[dict] = None
-    synthesis: bool = True
-    source: str = "bind9"
 
     @classmethod
     def new(
         cls,
-        timestamp,
+        ts,
         client_ip,
-        client_port,
         qname,
         qtype,
-        resolver_ip,
         rcode,
         latency_ms,
         pop_id,
         zone_id,
         ground_truth=None,
-        source="bind9",
     ):
         return cls(
-            timestamp=_iso8601(timestamp),
+            ts=_iso8601(ts),
             client_ip=client_ip,
-            client_port=client_port,
             qname=qname,
             qtype=qtype,
-            resolver_ip=resolver_ip,
             rcode=rcode,
             latency_ms=round(float(latency_ms), 3),
             pop_id=pop_id,
             zone_id=zone_id,
             ground_truth=ground_truth,
-            source=source,
         )
 
     def to_dict(self):

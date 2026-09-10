@@ -37,8 +37,6 @@ class SynthesizerTest(unittest.TestCase):
         self.assertEqual(event.zone_id, "BANCO-PA-Z1")
         self.assertEqual(event.rcode, "NOERROR")
         self.assertEqual(event.ground_truth, None)
-        self.assertTrue(event.synthesis)
-        self.assertEqual(event.source, "bind9")
 
     def test_latency_in_plausible_range(self):
         synth = DnstapSynthesizer(random.Random(1))
@@ -82,7 +80,7 @@ class EventSerializationTest(unittest.TestCase):
         event = DnstapSynthesizer(random.Random(7)).synthesize(_RECORD, _PROFILE)
         data = json.loads(event.to_json())
         self.assertEqual(data["schema_version"], SCHEMA_VERSION)
-        self.assertEqual(data["timestamp"], "2026-09-09T08:04:59.901Z")
+        self.assertEqual(data["ts"], "2026-09-09T08:04:59.901Z")
         self.assertIn("rcode", data)
         self.assertIn("latency_ms", data)
         self.assertIn("pop_id", data)

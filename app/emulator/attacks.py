@@ -309,4 +309,4 @@ def build_attack_stream(synthesizer, mapping, window, rng: random.Random):
         episode_e4_beaconing(synthesizer, mapping, window, random.Random(rng.getrandbits(32))),
         episode_e5_beaconing(synthesizer, mapping, window, random.Random(rng.getrandbits(32))),
     ]
-    yield from heap_merge(streams, key=attrgetter("timestamp"))
+    yield from heap_merge(streams, key=attrgetter("ts"))

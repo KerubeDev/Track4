@@ -29,7 +29,7 @@ class CliTest(unittest.TestCase):
             with open(out, "r", encoding="utf-8") as handle:
                 events = [json.loads(line) for line in handle if line.strip()]
             self.assertEqual(len(events), 6)
-            timestamps = [e["timestamp"] for e in events]
+            timestamps = [e["ts"] for e in events]
             self.assertEqual(timestamps, sorted(timestamps))
             self.assertEqual(timestamps[0], "2026-09-09T08:04:59.901Z")
             self.assertIn("replayed=6", result.stdout)
@@ -79,8 +79,7 @@ class CliTest(unittest.TestCase):
             self.assertEqual(episodes, {"E1", "E2", "E3", "E4", "E5"})
             for e in labeled:
                 self.assertIn("attack", e["ground_truth"])
-                self.assertEqual(e["source"], "attack-sim")
-            timestamps = [e["timestamp"] for e in events]
+            timestamps = [e["ts"] for e in events]
             self.assertEqual(timestamps, sorted(timestamps))
 
     def test_without_attack_emits_no_attack_events(self):
