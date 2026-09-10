@@ -1,0 +1,25 @@
+zone_id,zone_name,client_ip_prefix,pop_id,pop_name,baseline_qps,baseline_p95_latency_ms
+Z1,BANCO-PA,10.0.1.0/24,PAN-PAC-01,Panama Pacific,12.0,45.0
+Z1,BANCO-PA,10.0.1.0/24,PAN-ATL-01,Panama Atlantic,8.0,65.0
+Z1,BANCO-PA,10.0.1.0/24,COL-BOG-01,Colombia Bogota,10.0,55.0
+Z1,BANCO-PA,10.0.1.0/24,COL-MED-01,Colombia Medellin,7.0,70.0
+Z1,BANCO-PA,10.0.1.0/24,GUA-GUA-01,Guatemala Guatemala,9.0,60.0
+Z1,BANCO-PA,10.0.1.0/24,SAL-SAL-01,El Salvador San Salvador,6.0,75.0
+Z2,BANCO-COL,10.0.2.0/24,PAN-PAC-01,Panama Pacific,11.0,50.0
+Z2,BANCO-COL,10.0.2.0/24,PAN-ATL-01,Panama Atlantic,7.0,70.0
+Z2,BANCO-COL,10.0.2.0/24,COL-BOG-01,Colombia Bogota,13.0,40.0
+Z2,BANCO-COL,10.0.2.0/24,COL-MED-01,Colombia Medellin,9.0,55.0
+Z2,BANCO-COL,10.0.2.0/24,GUA-GUA-01,Guatemala Guatemala,6.0,80.0
+Z2,BANCO-COL,10.0.2.0/24,SAL-SAL-01,El Salvador San Salvador,5.0,85.0
+Z3,GOB-PA,10.0.3.0/24,PAN-PAC-01,Panama Pacific,14.0,35.0
+Z3,GOB-PA,10.0.3.0/24,PAN-ATL-01,Panama Atlantic,10.0,50.0
+Z3,GOB-PA,10.0.3.0/24,COL-BOG-01,Colombia Bogota,8.0,60.0
+Z3,GOB-PA,10.0.3.0/24,COL-MED-01,Colombia Medellin,6.0,75.0
+Z3,GOB-PA,10.0.3.0/24,GUA-GUA-01,Guatemala Guatemala,7.0,65.0
+Z3,GOB-PA,10.0.3.0/24,SAL-SAL-01,El Salvador San Salvador,5.0,90.0
+Z4,HOSP-PA,10.0.4.0/24,PAN-PAC-01,Panama Pacific,10.0,40.0
+Z4,HOSP-PA,10.0.4.0/24,PAN-ATL-01,Panama Atlantic,6.0,70.0
+Z4,HOSP-PA,10.0.4.0/24,COL-BOG-01,Colombia Bogota,8.0,55.0
+Z4,HOSP-PA,10.0.4.0/24,COL-MED-01,Colombia Medellin,5.0,80.0
+Z4,HOSP-PA,10.0.4.0/24,GUA-GUA-01,Guatemala Guatemala,7.0,60.0
+Z4,HOSP-PA,10.0.4.0/24,SAL-SAL-01,El Salvador San Salvador,4.0,95.0

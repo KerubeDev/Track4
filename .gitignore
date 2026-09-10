@@ -6,4 +6,4 @@ docs/data/LogsDNSQueries\ 2/
 .agents/skills/platform/runs/
 
 # Local ClickHouse dev data (managed by chctl).
-.clickhouse/
+.clickhouse/__pycache__/
