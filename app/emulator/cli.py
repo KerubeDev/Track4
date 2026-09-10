@@ -4,7 +4,7 @@ import random
 import sys
 
 from app.emulator import parser
-from app.emulator.emitter import JsonLinesEmitter, KafkaEmitter, NullEmitter
+from app.emulator.emitter import JsonLinesEmitter, KafkaBufferError, KafkaEmitter, NullEmitter
 from app.emulator.mapping import ZoneMapping, DEFAULT_MAPPING_PATH
 from app.emulator.playback import Playback, synthesize_stream
 from app.emulator.replay import DEFAULT_RATE, DEFAULT_SEED, ReplayConfig, find_dataset_files, merged_stream
@@ -65,7 +65,11 @@ def run(argv=None):
     emitter = build_emitter(args)
     playback = Playback(ReplayConfig(replay_rate=args.rate, seed=args.seed))
     stream = _limited(background, args.limit)
-    stats = playback.run(stream, emitter)
+    try:
+        stats = playback.run(stream, emitter)
+    except KafkaBufferError as exc:
+        print(f"FATAL: {exc}", file=sys.stderr)
+        sys.exit(1)
     emitter.close()
     kafka_failed = ""
     if args.emit == "kafka" and hasattr(emitter, "failed"):

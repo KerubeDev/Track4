@@ -9,6 +9,10 @@ class KafkaPartitionError(RuntimeError):
     pass
 
 
+class KafkaBufferError(RuntimeError):
+    pass
+
+
 def _topic_partition_count(bootstrap_servers, topic):
     from confluent_kafka.admin import AdminClient
 
@@ -125,11 +129,9 @@ class KafkaEmitter(Emitter):
                 attempts += 1
                 if attempts >= MAX_BUFFER_RETRIES:
                     self.failed += 1
-                    print(
-                        f"WARN: dropped event after {MAX_BUFFER_RETRIES} retries",
-                        file=sys.stderr,
+                    raise KafkaBufferError(
+                        f"buffer full after {MAX_BUFFER_RETRIES} retries, event dropped"
                     )
-                    return
                 self._producer.poll(0.5)
 
     def flush(self):

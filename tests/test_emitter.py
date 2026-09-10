@@ -8,6 +8,7 @@ from app.emulator.emitter import (
     MAX_BUFFER_RETRIES,
     Emitter,
     JsonLinesEmitter,
+    KafkaBufferError,
     KafkaEmitter,
     KafkaPartitionError,
     NullEmitter,
@@ -86,11 +87,12 @@ class KafkaEmitterTest(unittest.TestCase):
         self.assertEqual(emitter.failed, 0)
         self.assertEqual(fake.produced, 1)
 
-    def test_buffer_error_retry_is_bounded(self):
+    def test_buffer_error_raises_after_retries(self):
         fake = _FakeProducer(None)
         fake.fail = True
         emitter = _kafka(fake)
-        emitter.emit(_event())
+        with self.assertRaises(KafkaBufferError):
+            emitter.emit(_event())
         self.assertEqual(emitter.count, 0)
         self.assertEqual(emitter.failed, 1)
         self.assertEqual(fake.produced, 0)
