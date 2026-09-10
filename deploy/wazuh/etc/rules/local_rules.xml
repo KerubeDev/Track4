@@ -20,7 +20,8 @@
   <rule id="100101" level="12">
     <decoded_as>sentinel-dns-json</decoded_as>
     <field name="verdict">dga</field>
-    <field name="confidence">^0\.9\d+$|^0\.9[0-9]\d*$|^1\.0$</field>
+    <!-- PCRE2: confidence >= 0.90 (OS_Regex lacks \\d and quantifier support) -->
+    <field name="confidence" type="pcre2">^(?:0\.9\d*|1(?:\.0+)?)$</field>
     <description>Sentinel-DNS: DGA detected — high confidence</description>
     <group>sentinel-dns-dga</group>
   </rule>

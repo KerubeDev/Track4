@@ -6,8 +6,11 @@ Issue #14 (S2-T4) — Wazuh syslog ingestion
 Publishes each alert as a one-line JSON event via remote syslog,
 exactly per ADR-0004 and P3b severity mapping.
 
-The JSON event is sent as a single syslog message so Wazuh's
-decoder can parse it via <program_name>sentinel-dns</program_name>.
+The JSON event is sent as a single UDP syslog datagram (RFC 3164
+<header> + body) directly to the Wazuh manager so its
+``remote connection=syslog`` listener (``ossec.conf``, port 1514/udp)
+receives it, and the decoder can parse it via
+<program_name>sentinel-dns</program_name>.
 """
 
 from __future__ import annotations
@@ -136,9 +139,11 @@ def format_alert(
 class AlertPublisher:
     """Publishes sentinel-dns alerts via remote syslog to Wazuh.
 
-    Sends one-line JSON events with ``<program_name>sentinel-dns`` so
-    the Wazuh decoder (``local_decoder.xml``) can extract ``verdict``
-    and ``confidence`` fields.
+    Sends one-line JSON events as UDP syslog datagrams to
+    ``wazuh_host:wazuh_port`` (default ``wazuh:1514/udp``), with
+    ``<program_name>sentinel-dns`` in the message body so the Wazuh
+    decoder (``local_decoder.xml``) can extract ``verdict`` and
+    ``confidence`` fields.
 
     Usage::
 
@@ -161,7 +166,7 @@ class AlertPublisher:
         """Publish a verdict as a Wazuh alert.
 
         Resolves the Wazuh rule from the verdict + confidence, formats
-        the one-line JSON, and sends it via syslog.
+        the one-line JSON, and sends it via remote syslog.
 
         Returns ``True`` on success, ``False`` on failure (logged).
         """
@@ -177,75 +182,29 @@ class AlertPublisher:
 
         return self._send_syslog(alert_line)
 
-    def publish_raw(
-        self,
-        alert_json: str,
-        verdict: str,
-        confidence: float,
-    ) -> bool:
-        """Publish a pre-formatted JSON alert string.
-
-        Resolves the Wazuh rule but uses the provided JSON string
-        instead of formatting a new one.  Useful for testing or when
-        the alert is produced by an upstream component.
-        """
-        rule = resolve_wazuh_rule(verdict, confidence)
-        if rule is None:
-            logger.debug("Benign verdict — no Wazuh alert emitted")
-            return True
-
-        return self._send_syslog(alert_json)
-
     def _send_syslog(self, message: str) -> bool:
-        """Send a single syslog message to the Wazuh manager.
+        """Send one alert as a UDP syslog datagram to the Wazuh manager.
 
-        Uses ``LOG_LOCAL4`` facility and ``LOG_INFO`` priority,
-        matching the Wazuh ``remote connection=syslog`` listener.
+        Remote syslog per ADR-0004: a single datagram to
+        ``wazuh_host:wazuh_port`` (default ``wazuh:1514/udp``), matching
+        the Wazuh ``remote connection=syslog`` listener in ``ossec.conf``.
+        Priority is ``LOG_INFO`` on the configured facility (default
+        ``LOG_LOCAL4`` → ``<166>``), and the ``sentinel-dns`` ident is
+        carried in the message body so Wazuh's decoder matches
+        ``program_name``.
         """
+        pri = self._syslog_facility + syslog.LOG_INFO
+        payload = f"<{pri}>sentinel-dns: {message}"
         try:
-            syslog.openlog(
-                ident="sentinel-dns",
-                logoption=syslog.LOG_PID,
-                facility=self._syslog_facility,
-            )
-            syslog.syslog(syslog.LOG_INFO, message)
-            syslog.closelog()
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.sendto(payload.encode("utf-8"), (self.wazuh_host, self.wazuh_port))
             logger.debug(
                 "Alert sent to Wazuh %s:%d (%d bytes)",
                 self.wazuh_host,
                 self.wazuh_port,
-                len(message),
+                len(payload),
             )
             return True
-        except Exception as exc:
+        except OSError as exc:
             logger.error("Failed to send syslog to Wazuh: %s", exc)
             return False
-
-    @classmethod
-    def from_env(cls, **kwargs: Any) -> "AlertPublisher":
-        """Create an AlertPublisher from environment variables.
-
-        Env vars:
-          - ``WAZUH_HOST``: hostname/IP of the Wazuh manager (default: ``wazuh``)
-          - ``WAZUH_SYSLOG_PORT``: syslog port (default: ``1514``)
-        """
-        import os
-
-        return cls(
-            wazuh_host=kwargs.get(
-                "wazuh_host",
-                os.environ.get("WAZUH_HOST", "wazuh"),
-            ),
-            wazuh_port=kwargs.get(
-                "wazuh_port",
-                int(os.environ.get("WAZUH_SYSLOG_PORT", "1514")),
-            ),
-        )
-
-
-def create_publisher(
-    wazuh_host: str = "wazuh",
-    wazuh_port: int = 1514,
-) -> AlertPublisher:
-    """Factory for AlertPublisher (convenience function)."""
-    return AlertPublisher(wazuh_host=wazuh_host, wazuh_port=wazuh_port)

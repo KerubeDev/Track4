@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import json
 import os
-import sys
+import socket
+import syslog
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
+from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -402,15 +404,126 @@ class TestBenignNoAlert:
         assert result is True
 
     def test_publish_benign_no_syslog_sent(self) -> None:
-        """Benign verdict does not trigger syslog emission."""
+        """Benign verdict must never call _send_syslog (no datagram attempted)."""
         publisher = AlertPublisher(wazuh_host="localhost", wazuh_port=9999)
         vi = VerdictInfo(verdict="benign", confidence=0.99)
 
-        # The _send_syslog should never be called for benign
-        # We verify this by checking that publish returns True (success path)
-        # and that no actual network call is attempted
+        calls: list[str] = []
+        original = publisher._send_syslog
+
+        def _spy(message: str) -> bool:
+            calls.append(message)
+            return original(message)
+
+        publisher._send_syslog = _spy  # type: ignore[method-assign]
+
         result = publisher.publish(vi)
+
         assert result is True
+        assert calls == [], f"_send_syslog called for benign verdict: {calls}"
+
+
+# ===========================================================================
+# V5b: UDP remote-syslog transport (ADR-0004)
+# ===========================================================================
+
+class TestUdpSyslogTransport:
+    """V5b: _send_syslog sends a UDP datagram to wazuh_host:wazuh_port.
+
+    Regression tests for review finding F1: the publisher must target the
+    Wazuh manager (``SOCK_DGRAM`` + ``sendto`` to ``wazuh_host:wazuh_port``),
+    not the local syslog daemon.
+    """
+
+    # Captured at import time, before any patching of socket.socket.
+    AF_INET = socket.AF_INET
+    SOCK_DGRAM = socket.SOCK_DGRAM
+
+    def _make_verdict(self, **kwargs: Any) -> VerdictInfo:
+        defaults = {
+            "verdict": "dga",
+            "confidence": 0.95,
+            "reasoning_short": "High entropy domain",
+            "recommended_action": "Block",
+            "qname": "evil.example.com",
+            "client_ip": "10.0.1.50",
+            "signal_evidence": {},
+        }
+        defaults.update(kwargs)
+        return VerdictInfo(**defaults)
+
+    def test_publish_sends_udp_datagram_to_wazuh_target(self) -> None:
+        """publish() opens one UDP socket and sends one datagram to the target."""
+        publisher = AlertPublisher(wazuh_host="wazuh", wazuh_port=1514)
+        vi = self._make_verdict()
+
+        with patch("app.agent.alert_publisher.socket.socket") as sock_factory:
+            sock = sock_factory.return_value.__enter__.return_value
+            result = publisher.publish(vi)
+
+        assert result is True
+        sock_factory.assert_called_once_with(self.AF_INET, self.SOCK_DGRAM)
+        assert sock.sendto.call_count == 1
+
+        send_args, send_kwargs = sock.sendto.call_args
+        payload, target = send_args[0], send_args[1]
+        assert send_kwargs == {}
+        assert target == ("wazuh", 1514)
+        assert isinstance(payload, bytes)
+
+    def test_send_syslog_payload_has_pri_and_ident(self) -> None:
+        """Payload is ``<PRI>sentinel-dns: <json>`` — PRI 166 = LOCAL4.INFO."""
+        publisher = AlertPublisher()  # defaults: wazuh:1514, LOG_LOCAL4
+        vi = self._make_verdict(verdict="tunnel", confidence=0.88)
+
+        alert_line = format_alert(vi, rule_id=100103, severity=12)
+        expected_payload = (
+            f"<{syslog.LOG_LOCAL4 + syslog.LOG_INFO}>sentinel-dns: {alert_line}"
+        ).encode("utf-8")
+
+        with patch("app.agent.alert_publisher.socket.socket") as sock_factory:
+            sock = sock_factory.return_value.__enter__.return_value
+            assert publisher.publish(vi) is True
+
+        payload, _target = sock.sendto.call_args[0]
+        assert payload == expected_payload
+        assert payload.startswith(b"<166>sentinel-dns: ")
+
+    def test_send_syslog_uses_configured_target_and_facility(self) -> None:
+        """Custom host/port/facility are honored end to end."""
+        publisher = AlertPublisher(
+            wazuh_host="siem.example.com",
+            wazuh_port=5514,
+            syslog_facility=syslog.LOG_AUTH,
+        )
+
+        with patch("app.agent.alert_publisher.socket.socket") as sock_factory:
+            sock = sock_factory.return_value.__enter__.return_value
+            assert publisher._send_syslog('{"verdict":"dga"}') is True
+
+        payload, target = sock.sendto.call_args[0]
+        assert target == ("siem.example.com", 5514)
+        assert payload.startswith(
+            f"<{syslog.LOG_AUTH + syslog.LOG_INFO}>".encode("utf-8")
+        )
+
+    def test_send_syslog_returns_false_on_socket_error(self) -> None:
+        """A send failure is swallowed, logged, and reported as False."""
+        publisher = AlertPublisher(wazuh_host="wazuh", wazuh_port=1514)
+
+        with patch("app.agent.alert_publisher.socket.socket") as sock_factory:
+            sock = sock_factory.return_value.__enter__.return_value
+            sock.sendto.side_effect = OSError("network unreachable")
+            assert publisher._send_syslog('{"verdict":"dga"}') is False
+
+    def test_publish_benign_opens_no_socket(self) -> None:
+        """Benign verdict must not open a UDP socket at all."""
+        publisher = AlertPublisher(wazuh_host="wazuh", wazuh_port=1514)
+        vi = self._make_verdict(verdict="benign", confidence=0.99)
+
+        with patch("app.agent.alert_publisher.socket.socket") as sock_factory:
+            assert publisher.publish(vi) is True
+            sock_factory.assert_not_called()
 
 
 # ===========================================================================
