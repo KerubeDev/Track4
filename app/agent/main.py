@@ -21,6 +21,9 @@ import sys
 import time
 from typing import Any, Dict, Optional
 
+from app.common.health import start_health_server
+from app.common.kafka import wait_for_kafka
+
 logger = logging.getLogger("sentinel.agent")
 
 # ---------------------------------------------------------------------------
@@ -44,22 +47,6 @@ def _handle_signal(signum: int, _frame: Any) -> None:
     global _running
     logger.info("Received signal %s — shutting down", signum)
     _running = False
-
-
-def _wait_for_kafka(bootstrap: str, timeout: int = 60) -> bool:
-    """Wait for Kafka to become reachable."""
-    import socket
-    host, port = bootstrap.split(":")
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, int(port)), timeout=2):
-                logger.info("Kafka is reachable at %s", bootstrap)
-                return True
-        except OSError:
-            time.sleep(1)
-    logger.error("Kafka not reachable at %s after %ds", bootstrap, timeout)
-    return False
 
 
 def _process_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -91,13 +78,15 @@ def run() -> None:
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
+    start_health_server(HEALTH_PORT)
+
     logger.info(
         "Agent starting — KAFKA=%s  CLICKHOUSE=%s:%d  QVAC=%s  WAZUH=%s:%d",
         KAFKA_BOOTSTRAP, CLICKHOUSE_HOST, CLICKHOUSE_PORT,
         QVAC_URL, WAZUH_HOST, WAZUH_PORT,
     )
 
-    if not _wait_for_kafka(KAFKA_BOOTSTRAP):
+    if not wait_for_kafka(KAFKA_BOOTSTRAP):
         sys.exit(1)
 
     try:

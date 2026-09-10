@@ -22,6 +22,9 @@ import sys
 import time
 from typing import Any, Dict, List
 
+from app.common.health import start_health_server
+from app.common.kafka import wait_for_kafka
+
 logger = logging.getLogger("sentinel.emulator")
 
 # ---------------------------------------------------------------------------
@@ -71,22 +74,6 @@ def _generate_synthetic_events(seed: int, count: int = 100) -> List[Dict[str, An
     return events
 
 
-def _wait_for_kafka(bootstrap: str, timeout: int = 60) -> bool:
-    """Wait for Kafka to become reachable."""
-    import socket
-    host, port = bootstrap.split(":")
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, int(port)), timeout=2):
-                logger.info("Kafka is reachable at %s", bootstrap)
-                return True
-        except OSError:
-            time.sleep(1)
-    logger.error("Kafka not reachable at %s after %ds", bootstrap, timeout)
-    return False
-
-
 def run() -> None:
     """Main emulator loop — publish events to Kafka at REPLAY_RATE speed."""
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -97,12 +84,14 @@ def run() -> None:
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
+    start_health_server(HEALTH_PORT)
+
     logger.info(
         "Emulator starting — REPLAY_RATE=x%.1f  DEMO_SEED=%d  KAFKA=%s",
         REPLAY_RATE, DEMO_SEED, KAFKA_BOOTSTRAP,
     )
 
-    if not _wait_for_kafka(KAFKA_BOOTSTRAP):
+    if not wait_for_kafka(KAFKA_BOOTSTRAP):
         sys.exit(1)
 
     try:

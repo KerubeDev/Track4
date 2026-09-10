@@ -52,7 +52,7 @@ BIND dataset ──► emulator (replay P5, attack episodes P4)
 | P4 | Attack script: 5 escalating episodes (E1 DGA ~2000 queries / 5–8 IPs, E2 typosquat ~300, E3 tunnel ~1000/1 IP, E4+E5 beaconing ~60 s) over real-dataset background, fixed seed |
 | P5 | Dual clock: emulator publishes with original dataset timestamps; `REPLAY_RATE` (default x20) compresses only wall time, never the logical timeline |
 | P6 | Kafka: 1 topic `dns.telemetry.v1`, 3 partitions keyed by `client_ip`, ~1 h retention; ClickHouse: `dns_events_raw` (MergeTree by day, `ORDER BY (ts, client_ip)`) + `site_qoe_minute` (`ORDER BY (site, ts)`). Note: `client_port` and `resolver_ip` from ADR-0005 are excluded from the current schema per issue #11 scope. |
-| P7 | Single `docker compose up`: qvac, kafka (KRaft), emulator, agent, wazuh, clickhouse, grafana + idempotent `provision`; `REPLAY_RATE` and seed via `.env`; demo profile `--profile demo-video` |
+| P7 | Single `docker compose up`: qvac, kafka (KRaft), emulator, agent, wazuh, clickhouse, grafana + idempotent `provision`; `REPLAY_RATE` and seed via `.env`; full stack is always-on (no profile gate) |
 | P11–P18 | Vocabulary Cliente / Zona de cliente / PoP / Sitio; 6 PoPs + 4 clientes + `zone_mapping.csv` + latency profiles; `ground_truth` style; model `QWEN3_1_7B_INST_Q4`; mono-repo `docs/ app/ deploy/ scripts/`; 5-min video script (see `docs/video-script.md`) |
 
 ### Empirical basis for the thresholds (measured from the real dataset, in `docs/design.md`)

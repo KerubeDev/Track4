@@ -6,10 +6,10 @@
 #   qvac, kafka (KRaft), emulator, agent, wazuh, clickhouse, grafana
 #
 # Usage:
-#   docker compose up -d                          # start all services
-#   docker compose up -d --profile demo-video     # demo-friendly composition
+#   docker compose up -d                          # start the full stack
 #   docker compose run --rm provision             # idempotent provision
 #   docker compose ps                             # check health gate
+#   docker compose create --profile dev           # dev-only seed fixtures
 #
 # Configuration via .env (REPLAY_RATE, DEMO_SEED, etc.)
 # =============================================================================
@@ -171,7 +171,12 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    profiles: ["demo-video"]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${EMULATOR_HEALTH_PORT:-8080}/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -201,7 +206,12 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
-    profiles: ["demo-video"]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${AGENT_HEALTH_PORT:-8081}/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -226,6 +236,11 @@ services:
       - |
         apk add --no-cache bash >/dev/null 2>&1 || true
         exec /scripts/provision-full.sh
+    healthcheck:
+      test: ["CMD", "test", "-f", "/scripts/provision-full.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 1
     volumes:
       - ./:/scripts:ro
 

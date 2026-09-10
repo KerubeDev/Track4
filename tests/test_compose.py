@@ -7,7 +7,7 @@ Validates:
   V1 — Compose YAML is valid and contains all required services.
   V2 — All required services have healthchecks (health gate).
   V3 — .env defaults match acceptance criteria (REPLAY_RATE=x20, DEMO_SEED=42).
-  V4 — Demo profile is correctly configured for demo-video composition.
+  V4 — Default stack is always-on (no profile gate for core services).
   V5 — Provision script is idempotent (schema uses IF NOT EXISTS).
   V6 — Kafka is configured in KRaft mode (no Zookeeper dependency).
   V7 — Service dependency graph is correct (depends_on chains).
@@ -126,7 +126,7 @@ class TestComposeStructure:
 class TestHealthchecks:
     """V2: All core services have healthchecks for the health gate."""
 
-    SERVICES_WITHOUT_HEALTHCHECK = {"provision", "seed-fixtures", "emulator", "agent"}
+    SERVICES_WITHOUT_HEALTHCHECK = {"seed-fixtures"}
 
     def test_core_services_have_healthchecks(self, compose_config: Dict[str, Any]) -> None:
         """Core infrastructure services must have healthchecks."""
@@ -206,22 +206,22 @@ class TestEnvDefaults:
 # ===========================================================================
 
 class TestDemoProfile:
-    """V4: Demo profile correctly selects the demo-friendly composition."""
+    """V4: Services start with the default stack; no explicit profile needed."""
 
-    def test_emulator_has_demo_profile(self, compose_config: Dict[str, Any]) -> None:
-        """Emulator service must be in the demo-video profile."""
+    def test_emulator_has_no_profile(self, compose_config: Dict[str, Any]) -> None:
+        """Emulator runs on a plain `up` (no profile gate)."""
         emulator = compose_config["services"]["emulator"]
         profiles = emulator.get("profiles", [])
-        assert "demo-video" in profiles, (
-            f"Emulator missing 'demo-video' profile, got: {profiles}"
+        assert not profiles, (
+            f"Emulator should have no profile (always on), got: {profiles}"
         )
 
-    def test_agent_has_demo_profile(self, compose_config: Dict[str, Any]) -> None:
-        """Agent service must be in the demo-video profile."""
+    def test_agent_has_no_profile(self, compose_config: Dict[str, Any]) -> None:
+        """Agent runs on a plain `up` (no profile gate)."""
         agent = compose_config["services"]["agent"]
         profiles = agent.get("profiles", [])
-        assert "demo-video" in profiles, (
-            f"Agent missing 'demo-video' profile, got: {profiles}"
+        assert not profiles, (
+            f"Agent should have no profile (always on), got: {profiles}"
         )
 
     def test_seed_fixtures_has_dev_profile(self, compose_config: Dict[str, Any]) -> None:
@@ -233,8 +233,11 @@ class TestDemoProfile:
         )
 
     def test_core_services_have_no_profile(self, compose_config: Dict[str, Any]) -> None:
-        """Core infrastructure services should have no profile (always started)."""
-        core_services = ["kafka", "clickhouse", "grafana", "wazuh", "qvac", "provision"]
+        """Services that must always start should have no profile."""
+        core_services = [
+            "kafka", "clickhouse", "grafana", "wazuh", "qvac",
+            "provision", "emulator", "agent",
+        ]
         for name in core_services:
             svc = compose_config["services"][name]
             profiles = svc.get("profiles", [])
