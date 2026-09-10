@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 from app.common.health import start_health_server
 from app.common.kafka import wait_for_kafka
 from app.agent.filter import DeterministicFilter
+from app.agent.qvac_adapter import QVACAdapter
 
 logger = logging.getLogger("sentinel.agent")
 
@@ -43,6 +44,7 @@ HEALTH_PORT: int = int(os.environ.get("AGENT_HEALTH_PORT", "8081"))
 
 _running = True
 _filter = DeterministicFilter()
+_qvac = QVACAdapter(QVAC_URL)
 
 
 def _handle_signal(signum: int, _frame: Any) -> None:
@@ -60,12 +62,15 @@ def _process_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     candidate = _filter.process(event)
     if candidate is None:
         return None
+    verdict = _qvac.infer(candidate["qname"], candidate["signals"], {"client_ip": candidate["client_ip"]})
     return {
         **candidate,
-        "verdict": "unverified",
-        "confidence": 0.0,
-        "reasoning_short": "Deterministic escalation: " + ", ".join(candidate["signals"]),
-        "recommended_action": "Investigate",
+        "verdict": verdict.verdict,
+        "confidence": verdict.confidence,
+        "reasoning_short": verdict.reasoning_short,
+        "recommended_action": verdict.recommended_action,
+        "signal_evidence": verdict.signal_evidence,
+        "qvac_latency_ms": verdict.latency_ms,
     }
 
 
