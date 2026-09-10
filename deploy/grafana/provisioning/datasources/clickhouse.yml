@@ -1,0 +1,24 @@
+# =============================================================================
+# clickhouse.yml — ClickHouse datasource provisioning
+# Issue #13 (S2-T3) — Sentinel-DNS Track4
+#
+# Auto-provisioned on Grafana startup (no manual "Add datasource" clicks).
+# Uses the grafana-clickhouse-datasource plugin installed via
+# GF_INSTALL_PLUGINS in docker-compose.yml.
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    access: proxy
+    uid: sentinel-clickhouse
+    jsonData:
+      defaultDatabase: sentinel_dns
+      port: 8123
+      protocol: http
+      host: clickhouse
+      tlsSkipVerify: true
+    isDefault: true
+    editable: true

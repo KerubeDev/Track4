@@ -1,11 +1,11 @@
 version: "3.8"
 
 # =============================================================================
-# docker-compose.yml — ClickHouse service for Sentinel-DNS Track4
-# Issue #11 (S2-T1)
+# docker-compose.yml — ClickHouse + Grafana services for Sentinel-DNS Track4
+# Issues #11 (S2-T1), #13 (S2-T3)
 #
 # Usage:
-#   docker compose up -d clickhouse          # start ClickHouse
+#   docker compose up -d clickhouse grafana  # start ClickHouse + Grafana
 #   docker compose run --rm provision        # apply schema (idempotent)
 #   docker compose run --rm seed-fixtures    # insert test data + validate
 # =============================================================================
@@ -77,5 +77,34 @@ services:
     volumes:
       - ./clickhouse:/scripts:ro
 
+  # ---------------------------------------------------------------------------
+  # Grafana — provisioned dashboard for QoE monitoring
+  # Issue #13 (S2-T3) — five panels: QoE, latency, NXDOMAIN, saturation, culprit
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: sentinel-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: sentinel
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/sentinel-dns.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   clickhouse-data:
+  grafana-data:
