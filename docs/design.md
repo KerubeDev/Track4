@@ -7,14 +7,33 @@ per-site QoE, with no query or inference leaving the client's datacenter.
 
 - **Two-stage detection** (ADR-0002): fast, deterministic rules filter (math + counting with temporal memory:
   DGA, typosquatting, tunneling bursts, beaconing) → QVAC decides via LLM over the suspicious/ambiguous ones.
+- **Filter signals** (ADR-0002): five deterministic detectors over a sliding window, per `client_ip` and per
+  e2ld, with configurable thresholds; escalation rules decide what reaches QVAC (see below).
 - **Local QVAC** (ADR-0003): OpenAI-compatible HTTP server on `localhost:11434`, model from the QVAC registry
-  (`QWEN3_1_7B_INST_Q4`, ~1 GB), preloaded, 100% offline demo.
+  (`QWEN3_1_7B_INST_Q4`, ~1 GB), preloaded, 100% offline demo. Verdict contract: strict one-shot JSON
+  `{verdict, confidence, reasoning_short, recommended_action}`; malformed output → `unverified` alert.
 - **Read-only consumption** (ADR-0001): the agent never touches the production pipeline; in the demo, the
   emulator faithfully reproduces it.
 - **Event schema** (ADR-0005): derived from the BIND9 log + synthesized dnstap layer (rcode, latency_ms,
   pop_id, zone_id). Versioned (`schema_version`).
-- **Real Wazuh** (ADR-0004): JSON alert via remote syslog, local decoder/rules, severity by verdict.
-- **Per-site QoE** (ADR-0006): 0–100 score per minute, culprit breakdown, human labels.
+- **Real Wazuh** (ADR-0004): JSON alert via remote syslog, local decoder/rules, severity by verdict mapping
+  (`local_rules.xml`, IDs 100101–100106).
+- **Per-site QoE** (ADR-0006): 0–100 score per minute, culprit breakdown, human labels; weights and thresholds
+  fixed (45/35/20; 85/70/50) and justification-guarded in `config/qoe.yaml`.
+
+## Filter signals and escalation
+
+| Id | Signal | Escalates alone? | Rule |
+|---|---|---|---|
+| 1 | NXDOMAIN ratio | Yes | ratio ≥ 0.6 in the window |
+| 2 | Entropy (Shannon) | No | entropy ≥ 3.5 **and** rarity (signal 4) |
+| 3 | Length | Yes | **composite**: single label > 40 chars **and** entropy > 3.5 **and** repeated in ≤ 60 s |
+| 4 | Rarity | Never | e2ld below count `N` in the client's window; reinforces signal 2; typosquatting = edit-distance against the client's vocabulary, not rarity |
+| 5 | Beaconing | Yes | periodicity confirmed in the window (inter-arrival variance / autocorrelation) |
+
+Empirical basis (measured on the real dataset, `scripts/baseline-qname-dist.sh`): longest single label
+mean 10.5, p90 17, p95 21, p99 36, max 63; 29.8 % of unique qnames appear once (rarity alone unusable);
+top e2ld repeaters are microsoft.com/google.com/googleapis.com; QTYPE mix dominated by A + HTTPS/TYPE65.
 
 ## Flow
 
@@ -59,6 +78,16 @@ zone_mapping ─────────┘
 
 The injected dataset carries `ground_truth` to measure precision/recall of the full pipeline (filter + QVAC,
 ADR-0002), and the attack script stress-tests the QoE (ADR-0006). Evaluation artifacts run with the repo alone.
+
+Evaluation protocol (confirmed): unit = query; TP/FP/FN/TN matrix; precision, recall, and F1 (macro and per
+class); filter elimination rate; p50/p95 latency (filter vs QVAC); splits by `zone_id`/`pop_id`.
+`ground_truth` exists only inside the emulator — the agent never reads it.
+
+Attack script (confirmed): 5 escalating episodes (E1 DGA ~2000 queries / 5–8 IPs, E2 typosquat ~300,
+E3 tunnel ~1000 / 1 IP, E4+E5 beaconing ~60 s) interleaved with the real-dataset background, fixed seed.
+
+Dual clock (confirmed): the emulator publishes with the original dataset timestamps; `REPLAY_RATE`
+(default x20) compresses wall time only, never the logical timeline seen by the detectors.
 
 ## Deliverables
 
