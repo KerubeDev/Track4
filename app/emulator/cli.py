@@ -4,6 +4,7 @@ import random
 import sys
 
 from app.emulator import parser
+from app.emulator.attacks import build_attack_stream
 from app.emulator.emitter import JsonLinesEmitter, KafkaBufferError, KafkaEmitter, NullEmitter
 from app.emulator.mapping import ZoneMapping, DEFAULT_MAPPING_PATH
 from app.emulator.playback import Playback, synthesize_stream
@@ -25,8 +26,10 @@ def parse_args(argv=None):
                         help="path to zone_mapping.csv")
     parser.add_argument("--rate", type=float, default=_env_float("REPLAY_RATE", DEFAULT_RATE),
                         help="REPLAY_RATE: wall-clock compression factor (0 = no wait)")
-    parser.add_argument("--seed", type=int, default=int(os.environ.get("EMULATOR_SEED", DEFAULT_SEED)),
-                        help="RNG seed for the synthesized dnstap layer")
+    parser.add_argument("--seed", type=int, default=_seed_default(),
+                        help="RNG seed for the synthesized dnstap layer and any injected attack stream")
+    parser.add_argument("--attack", action="store_true",
+                        help="inject the five-episode attack script (E1-E5) with ground truth into the replay")
     parser.add_argument("--emit", choices=EMITTERS, default=os.environ.get("EMULATOR_EMIT", "null"),
                         help="destination for the JSON events")
     parser.add_argument("--out", default=None, help="JSON-lines output file (--emit json)")
@@ -40,6 +43,23 @@ def parse_args(argv=None):
 def _env_float(name, default):
     value = os.environ.get(name)
     return float(value) if value is not None else default
+
+
+def _seed_default():
+    """Seed precedence: .env DEMO_SEED, then EMULATOR_SEED, then DEFAULT_SEED."""
+    value = os.environ.get("DEMO_SEED") or os.environ.get("EMULATOR_SEED")
+    return int(value) if value is not None else DEFAULT_SEED
+
+
+def _logical_window(dataset):
+    """First/last record timestamps across the merged dataset (the replay window)."""
+    first = None
+    last = None
+    for record in merged_stream(find_dataset_files(dataset)):
+        if first is None:
+            first = record.timestamp
+        last = record.timestamp
+    return first, last
 
 
 def build_emitter(args):
@@ -65,8 +85,14 @@ def run(argv=None):
     emitter = build_emitter(args)
     playback = Playback(ReplayConfig(replay_rate=args.rate, seed=args.seed))
     stream = _limited(background, args.limit)
+    attack_stream = None
+    if args.attack and args.dataset:
+        window = _logical_window(args.dataset)
+        attack_stream = build_attack_stream(
+            synthesizer, mapping, window, random.Random(args.seed)
+        )
     try:
-        stats = playback.run(stream, emitter)
+        stats = playback.run(stream, emitter, attack_stream=attack_stream)
     except KafkaBufferError as exc:
         print(f"FATAL: {exc}", file=sys.stderr)
         sys.exit(1)

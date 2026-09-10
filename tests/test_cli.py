@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -61,6 +62,52 @@ class CliTest(unittest.TestCase):
     def test_limit_stops_early(self):
         result = _run_emulator(["--dataset", "tests/fixtures", "--emit", "null", "--rate", "0", "--seed", "1", "--limit", "3"])
         self.assertIn("replayed=3", result.stdout)
+
+    def test_attack_flag_injects_episodes_with_ground_truth(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "events.json")
+            result = _run_emulator(
+                ["--dataset", "tests/fixtures", "--emit", "json", "--out", out, "--rate", "0", "--seed", "42", "--attack"]
+            )
+            attack_match = re.search(r"attack=(\d+)", result.stdout)
+            self.assertIsNotNone(attack_match)
+            self.assertGreater(int(attack_match.group(1)), 0)
+            with open(out, "r", encoding="utf-8") as handle:
+                events = [json.loads(line) for line in handle if line.strip()]
+            labeled = [e for e in events if e.get("ground_truth")]
+            episodes = {e["ground_truth"]["episode"] for e in labeled}
+            self.assertEqual(episodes, {"E1", "E2", "E3", "E4", "E5"})
+            for e in labeled:
+                self.assertIn("attack", e["ground_truth"])
+                self.assertEqual(e["source"], "attack-sim")
+            timestamps = [e["timestamp"] for e in events]
+            self.assertEqual(timestamps, sorted(timestamps))
+
+    def test_without_attack_emits_no_attack_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "events.json")
+            result = _run_emulator(
+                ["--dataset", "tests/fixtures", "--emit", "json", "--out", out, "--rate", "0", "--seed", "42"]
+            )
+            self.assertIn("attack=0", result.stdout)
+            with open(out, "r", encoding="utf-8") as handle:
+                events = [json.loads(line) for line in handle if line.strip()]
+            self.assertTrue(all(e.get("ground_truth") is None for e in events))
+
+    def test_seed_default_honors_demo_seed_env(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "events.json")
+            env = dict(_os.environ)
+            env["DEMO_SEED"] = "99"
+            env.pop("EMULATOR_SEED", None)
+            result = subprocess.run(
+                [sys.executable, "-m", "app.emulator", "--dataset", "tests/fixtures",
+                 "--emit", "json", "--out", out, "--rate", "0"],
+                cwd=REPO, capture_output=True, text=True, check=True, env=env,
+            )
+            self.assertIn("seed=99", result.stdout)
 
 
 if __name__ == "__main__":
