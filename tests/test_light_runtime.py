@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from app.light.store import LocalStore
 from app.light.runtime import process
 
@@ -15,7 +13,9 @@ class FakeQVAC:
 
 
 def test_local_store_snapshot(tmp_path):
-    s=LocalStore(tmp_path/"shield.db"); s.write_event(_event(0)); snap=s.snapshot(); s.close(); assert snap["events"]==1 and snap["alerts"]==0
+    s=LocalStore(tmp_path/"shield.db"); s.write_event(_event(0)); snap=s.snapshot(); s.close()
+    assert snap["events"]==1 and snap["alerts"]==0 and snap["candidates"]==0
+    assert snap["filter_reduction_percent"]==100.0
 
 
 def test_light_pipeline_without_infrastructure(tmp_path, monkeypatch):
@@ -26,3 +26,6 @@ def test_light_pipeline_without_infrastructure(tmp_path, monkeypatch):
     count, alerts=process(events, store, "http://127.0.0.1:11434")
     snap=store.snapshot(); store.close()
     assert count==5 and alerts>=1 and snap["events"]==5 and snap["alerts"]>=1
+    assert snap["candidates"]>=1
+    assert 0 <= snap["filter_reduction_percent"] < 100
+    assert snap["recent_alerts"][0]["signals"]
