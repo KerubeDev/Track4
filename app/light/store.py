@@ -68,12 +68,20 @@ class LocalStore:
 
     def snapshot(self) -> dict[str, Any]:
         total = self.db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        candidates = self.db.execute("SELECT COUNT(*) FROM events WHERE verdict IS NOT NULL").fetchone()[0]
         alerts = self.db.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
         qvac = self.db.execute("SELECT COALESCE(AVG(qvac_latency_ms),0) FROM alerts").fetchone()[0]
-        recent = [dict(r) for r in self.db.execute("SELECT ts,qname,client_ip,verdict,confidence,reasoning,recommended_action FROM alerts ORDER BY id DESC LIMIT 30")]
+        recent = [dict(r) for r in self.db.execute("SELECT ts,qname,client_ip,verdict,confidence,reasoning,recommended_action,signals_json FROM alerts ORDER BY id DESC LIMIT 30")]
+        for item in recent:
+            item["signals"] = json.loads(item.pop("signals_json") or "{}")
         qoe = [dict(r) for r in self.db.execute("SELECT * FROM qoe ORDER BY ts DESC, site LIMIT 60")]
         verdicts = [dict(r) for r in self.db.execute("SELECT verdict,COUNT(*) AS count FROM alerts GROUP BY verdict ORDER BY count DESC")]
-        return {"events": total, "alerts": alerts, "avg_qvac_ms": round(float(qvac), 1), "recent_alerts": recent, "qoe": qoe, "verdicts": verdicts}
+        reduction = 100 * (1 - candidates / total) if total else 0.0
+        return {
+            "events": total, "candidates": candidates, "alerts": alerts,
+            "filter_reduction_percent": round(reduction, 2), "avg_qvac_ms": round(float(qvac), 1),
+            "recent_alerts": recent, "qoe": qoe, "verdicts": verdicts,
+        }
 
     def close(self) -> None:
         self.db.close()
