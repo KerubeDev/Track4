@@ -1,70 +1,42 @@
-# =============================================================================
-# docker-compose.yml — Full Sentinel-DNS stack
-# Issue #15 (S2-T5) — Docker compose + idempotent provision
-#
-# Single `docker compose up` starts the full stack:
-#   qvac, kafka (KRaft), emulator, agent, wazuh, clickhouse, grafana
-#
-# Usage:
-#   docker compose up -d                          # start the full stack
-#   docker compose run --rm provision             # idempotent provision
-#   docker compose ps                             # check health gate
-#   docker compose create --profile dev           # dev-only seed fixtures
-#
-# Configuration via .env (REPLAY_RATE, DEMO_SEED, etc.)
-# =============================================================================
+name: shield
 
 services:
-  # ---------------------------------------------------------------------------
-  # Kafka (KRaft mode — no Zookeeper)
-  # Single-broker cluster for the demo; topic auto-created on first produce.
-  # ---------------------------------------------------------------------------
   kafka:
     image: bitnamilegacy/kafka:3.7.0
-    container_name: sentinel-kafka
     environment:
-      # KRaft mode configuration
       KAFKA_CFG_NODE_ID: "${KAFKA_BROKER_ID:-1}"
       KAFKA_CFG_PROCESS_ROLES: "broker,controller"
       KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:${KAFKA_CONTROLLER_PORT:-9093}"
       KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-      # Listeners
       KAFKA_CFG_LISTENERS: "PLAINTEXT://:${KAFKA_PORT:-9092},CONTROLLER://:${KAFKA_CONTROLLER_PORT:-9093}"
       KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:${KAFKA_PORT:-9092}"
       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
       KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-      # Topic defaults
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_CFG_NUM_PARTITIONS: "3"
       KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: "1"
-      KAFKA_CFG_RETENTION_MS: "3600000"
-      # Cluster ID for KRaft
-      KAFKA_CFG_CLUSTER_ID: "${KAFKA_CLUSTER_ID:-multiline-sentinel-dns-cluster}"
+      KAFKA_CFG_RETENTION_MS: "${KAFKA_TOPIC_RETENTION_MS:-3600000}"
+      KAFKA_CFG_CLUSTER_ID: "${KAFKA_CLUSTER_ID:-shield-local-kraft-cluster}"
     ports:
       - "${KAFKA_PORT:-9092}:${KAFKA_PORT:-9092}"
     volumes:
       - kafka-data:/bitnami/kafka
     healthcheck:
-      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:${KAFKA_PORT:-9092} --list || exit 1"]
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:${KAFKA_PORT:-9092} --list >/dev/null 2>&1"]
       interval: 10s
       timeout: 15s
       retries: 10
-      start_period: 60s
+      start_period: 45s
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Kafka topic init — one-shot, idempotent topic provisioning (issue #7)
-  # Creates dns.telemetry.v1 with 3 partitions, retention ~1 h, cleanup.delete.
-  # ---------------------------------------------------------------------------
   kafka-init:
     image: bitnamilegacy/kafka:3.7.0
-    container_name: sentinel-kafka-init
     depends_on:
       kafka:
         condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP: "kafka:${KAFKA_PORT:-9092}"
-      KAFKA_TOPIC: "dns.telemetry.v1"
+      KAFKA_TOPIC: dns.telemetry.v1
       KAFKA_TOPIC_PARTITIONS: "3"
       KAFKA_TOPIC_RETENTION_MS: "${KAFKA_TOPIC_RETENTION_MS:-3600000}"
     entrypoint: ["/bin/bash", "/scripts/init-topics.sh"]
@@ -72,38 +44,24 @@ services:
       - ./kafka:/scripts:ro
     restart: "no"
 
-  # ---------------------------------------------------------------------------
-  # Kafka health probe — one-shot consumer-side validation (issue #7)
-  # Confirms the topic partitions, retention config, and live offset advance.
-  # The compose emulator writes a deterministic batch and exits, so the probe
-  # runs with --allow-idle-data and depends only on the topic being ready.
-  # ---------------------------------------------------------------------------
   kafka-probe:
     build:
       context: ..
       dockerfile: deploy/docker/Dockerfile.python-base
-    container_name: sentinel-kafka-probe
-    command: ["python", "-m", "app.common.kafka_health", "--bootstrap",
-              "kafka:${KAFKA_PORT:-9092}", "--topic", "dns.telemetry.v1",
-              "--sample-seconds", "${KAFKA_PROBE_SAMPLE_SECONDS:-30}",
-              "--allow-idle-data"]
+    command: ["python", "-m", "app.common.kafka_health", "--bootstrap", "kafka:${KAFKA_PORT:-9092}", "--topic", "dns.telemetry.v1", "--sample-seconds", "${KAFKA_PROBE_SAMPLE_SECONDS:-30}", "--allow-idle-data"]
     depends_on:
       kafka-init:
         condition: service_completed_successfully
     restart: "no"
 
-  # ---------------------------------------------------------------------------
-  # ClickHouse — raw events store + QoE aggregate
-  # ---------------------------------------------------------------------------
   clickhouse:
     image: clickhouse/clickhouse-server:24.3-alpine
-    container_name: sentinel-clickhouse
+    environment:
+      CLICKHOUSE_DB: "${CLICKHOUSE_DB:-sentinel_dns}"
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports:
       - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
       - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
-    environment:
-      CLICKHOUSE_DB: "${CLICKHOUSE_DB:-sentinel_dns}"
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
@@ -111,22 +69,18 @@ services:
       test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Grafana — provisioned dashboard for QoE monitoring
-  # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:11.1.0
-    container_name: sentinel-grafana
-    ports:
-      - "3000:3000"
     environment:
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
       GF_SECURITY_ADMIN_USER: "${GF_SECURITY_ADMIN_USER:-admin}"
-      GF_SECURITY_ADMIN_PASSWORD: "${GF_SECURITY_ADMIN_PASSWORD:-sentinel}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GF_SECURITY_ADMIN_PASSWORD:-change-me}"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/sentinel-dns.json
+    ports:
+      - "3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -135,27 +89,18 @@ services:
       clickhouse:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3000/api/health"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
+      start_period: 20s
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Wazuh — SIEM for sentinel-dns alerts
-  # ---------------------------------------------------------------------------
   wazuh:
     image: wazuh/wazuh-manager:4.9.2
-    container_name: sentinel-wazuh
-    hostname: wazuh
     ports:
       - "1514:1514/udp"
       - "55000:55000"
-    environment:
-      INDEXER_URL: "https://wazuh-indexer:9200"
-      INDEXER_USERNAME: "${INDEXER_USERNAME:-admin}"
-      INDEXER_PASSWORD: "${INDEXER_PASSWORD:-admin}"
-      FILEBEAT_BOOTSTRAP: "no"
     volumes:
       - ./wazuh/etc/ossec.conf:/var/ossec/etc/ossec.conf:ro
       - ./wazuh/etc/shared/ar.conf:/var/ossec/etc/shared/ar.conf:ro
@@ -163,17 +108,14 @@ services:
       - ./wazuh/etc/rules/local_rules.xml:/var/ossec/etc/rules/local_rules.xml:ro
       - wazuh-data:/var/ossec/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:55000/monitor')"]
-      interval: 30s
+      test: ["CMD-SHELL", "/var/ossec/bin/wazuh-control status 2>/dev/null | grep -q 'is running'"]
+      interval: 20s
       timeout: 10s
-      retries: 5
-      start_period: 60s
+      retries: 10
+      start_period: 45s
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Local QVAC runtime. The image is supplied by the QVAC installation and
-  # must contain the precached model; no cloud endpoint is accepted.
-  # ---------------------------------------------------------------------------
+  # Optional. The normal workstation topology runs QVAC directly on the host.
   qvac:
     profiles: ["container-qvac"]
     build:
@@ -181,95 +123,93 @@ services:
       dockerfile: Dockerfile
       args:
         QVAC_CLI_VERSION: "${QVAC_CLI_VERSION:-0.13.0}"
-    image: "${QVAC_IMAGE:-sentinel-qvac-local:preloaded}"
-    container_name: sentinel-qvac
+    image: "${QVAC_IMAGE:-shield-qvac-local:preloaded}"
     command: ["qvac", "serve", "openai", "--host", "0.0.0.0", "--port", "${QVAC_PORT:-11434}"]
     environment:
-      QVAC_PORT: "${QVAC_PORT:-11434}"
       QVAC_MODEL: "${QVAC_MODEL:-QWEN3_1_7B_INST_Q4}"
-      QVAC_TIMEOUT_SECONDS: "${QVAC_TIMEOUT_SECONDS:-30}"
     ports:
       - "${QVAC_PORT:-11434}:${QVAC_PORT:-11434}"
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${QVAC_PORT:-11434}/ping"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${QVAC_PORT:-11434}/ping >/dev/null"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 8
+      start_period: 15s
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Emulator — replays the mounted BIND9 dataset into Kafka.
-  # ---------------------------------------------------------------------------
   emulator:
     build:
       context: ..
       dockerfile: deploy/docker/Dockerfile.python-base
-    container_name: sentinel-emulator
     command: ["python", "-m", "app.emulator.main"]
     environment:
       REPLAY_RATE: "${REPLAY_RATE:-20}"
       DEMO_SEED: "${DEMO_SEED:-42}"
       KAFKA_BOOTSTRAP: "kafka:${KAFKA_PORT:-9092}"
-      KAFKA_TOPIC: "dns.telemetry.v1"
-      DATASET_PATH: "/data/queries"
+      KAFKA_TOPIC: dns.telemetry.v1
+      DATASET_PATH: /data/queries
     volumes:
       - ../docs/data/LogsDNSQueries:/data/queries:ro
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${EMULATOR_HEALTH_PORT:-8080}/ping"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 60s
+      retries: 8
+      start_period: 30s
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Agent — consumes Kafka events, persists telemetry, computes QoE, and alerts Wazuh.
-  # ---------------------------------------------------------------------------
   agent:
     build:
       context: ..
       dockerfile: deploy/docker/Dockerfile.python-base
-    container_name: sentinel-agent
     command: ["python", "-m", "app.agent.main"]
     environment:
       KAFKA_BOOTSTRAP: "kafka:${KAFKA_PORT:-9092}"
-      KAFKA_TOPIC: "dns.telemetry.v1"
-      KAFKA_GROUP: "sentinel-agent"
-      CLICKHOUSE_HOST: "clickhouse"
-      CLICKHOUSE_PORT: "${CLICKHOUSE_HTTP_PORT:-8123}"
+      KAFKA_TOPIC: dns.telemetry.v1
+      KAFKA_GROUP: shield-agent
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
       CLICKHOUSE_DB: "${CLICKHOUSE_DB:-sentinel_dns}"
       QVAC_URL: "${QVAC_URL:-http://host.docker.internal:${QVAC_PORT:-11434}}"
-      WAZUH_HOST: "wazuh"
+      QVAC_MODEL: "${QVAC_MODEL:-QWEN3_1_7B_INST_Q4}"
+      QVAC_TIMEOUT_SECONDS: "${QVAC_TIMEOUT_SECONDS:-30}"
+      WAZUH_HOST: wazuh
       WAZUH_PORT: "1514"
+      FILTER_WINDOW_SECONDS: "${FILTER_WINDOW_SECONDS:-60}"
+      FILTER_MIN_WINDOW_EVENTS: "${FILTER_MIN_WINDOW_EVENTS:-5}"
+      FILTER_NXDOMAIN_RATIO: "${FILTER_NXDOMAIN_RATIO:-0.6}"
+      FILTER_ENTROPY: "${FILTER_ENTROPY:-3.5}"
+      FILTER_LONG_LABEL: "${FILTER_LONG_LABEL:-40}"
+      FILTER_RARITY: "${FILTER_RARITY:-0.2}"
+      FILTER_BEACON_VARIANCE: "${FILTER_BEACON_VARIANCE:-4}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       clickhouse:
+        condition: service_healthy
+      wazuh:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${AGENT_HEALTH_PORT:-8081}/ping"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 60s
+      retries: 8
+      start_period: 30s
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Provision — idempotent full-stack provisioning
-  # Creates ClickHouse tables, verifies Grafana datasource/dashboard,
-  # and confirms Wazuh rules/decoder. Safe to run multiple times.
-  # ---------------------------------------------------------------------------
   provision:
-    image: curlimages/curl:latest
-    container_name: sentinel-provision
+    image: curlimages/curl:8.10.1
     depends_on:
       clickhouse:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+      wazuh:
         condition: service_healthy
     environment:
       CLICKHOUSE_HOST: clickhouse
@@ -278,24 +218,18 @@ services:
       GRAFANA_HOST: grafana
       GRAFANA_PORT: "3000"
     entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        apk add --no-cache bash >/dev/null 2>&1 || true
-        exec /scripts/provision-full.sh
+    command: ["exec /scripts/provision-full.sh"]
+    volumes:
+      - ./clickhouse:/scripts:ro
     healthcheck:
       test: ["CMD", "test", "-f", "/scripts/provision-full.sh"]
       interval: 30s
       timeout: 5s
       retries: 1
-    volumes:
-      - ./clickhouse:/scripts:ro
+    restart: "no"
 
-  # ---------------------------------------------------------------------------
-  # Seed fixtures — dev/test only
-  # ---------------------------------------------------------------------------
   seed-fixtures:
-    image: curlimages/curl:latest
-    container_name: sentinel-seed
+    image: curlimages/curl:8.10.1
     profiles: ["dev"]
     depends_on:
       clickhouse:
@@ -305,12 +239,10 @@ services:
       CLICKHOUSE_PORT: "8123"
       CLICKHOUSE_DB: "${CLICKHOUSE_DB:-sentinel_dns}"
     entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        apk add --no-cache bash >/dev/null 2>&1 || true
-        exec /scripts/seed-fixtures.sh
+    command: ["exec /scripts/seed-fixtures.sh"]
     volumes:
       - ./clickhouse:/scripts:ro
+    restart: "no"
 
 volumes:
   clickhouse-data:
