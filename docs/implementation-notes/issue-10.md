@@ -27,4 +27,13 @@
 - Regression seams: `pytest -q tests/test_filter.py tests/test_qvac_adapter.py tests/test_attacks.py` → 47 passed, 1 skipped.
 - Full suite at completion: `pytest -q tests/` → 196 passed, 1 skipped, 3 failed, 1 collection error.
   - The 3 failures (`test_hour_replay.py` x2, `test_playback.py::test_find_dataset_files_natural_sort`) and the `test_wazuh.py` collection error are pre-existing on this Windows-host view of the WSL filesystem (CRLF line endings, backslash path separators, Unix-only `syslog` import) and are unrelated to this change; they pass in the WSL/Linux environment per prior validation records.
-- End-to-end sanity on the real emulator (`--attack --seed 42` over `tests/fixtures`): harness scored 3366 queries; DGA recall 83.1 % / precision 88.8 %; benign elimination rate 66.7 % (only 6 benign fixtures exist in that tiny window). This fixture is not representative enough to verify the issue's `>= 80 %` benign-elimination acceptance threshold, so that end-to-end acceptance criterion remains **pending**. Tunnel/beaconing/typosquat episodes compress into a ~2 s replay window where the corresponding thresholded signals (repetition, >= 5 s intervals, entropy >= 3.5) cannot fire; the harness surfaces this as low recall, which is expected for this fixture scale.
+- End-to-end sanity on the real emulator (`--attack --seed 42` over `tests/fixtures`): harness scored 3366 queries; DGA recall 83.1 % / precision 88.8 %; benign elimination rate 66.7 % (only 6 benign fixtures exist in that tiny window). This fixture is not representative enough to verify the issue's `>= 80 %` benign-elimination acceptance threshold. Tunnel/beaconing/typosquat episodes compress into a ~2 s replay window where the corresponding thresholded signals (repetition, >= 5 s intervals, entropy >= 3.5) cannot fire; the harness surfaces this as low recall, which is expected for this fixture scale.
+
+## Acceptance validation
+
+- Real-dataset sample with all five attack episodes (100,000 background queries, seed 42):
+  `python3 -m app.emulator --dataset docs/data/LogsDNSQueries --emit json --out sample-e1-e5-run.jsonl --rate 0 --seed 42 --attack --limit 100000`
+  followed by:
+  `python3 -m app.eval --run sample-e1-e5-run.jsonl --out sample-e1-e5-report.json --min-benign-elimination 0.8`
+- Result: 103,420 queries scored, including E1 (2,000), E2 (300), E3 (1,000), E4 (60), and E5 (60); 91,386 of 100,000 benign queries avoided QVAC (91.4 %). The threshold check exited successfully.
+- This sampled real-dataset run satisfies the `>= 80 % benign never costs a QVAC call` acceptance check without duplicating or fabricating benign traffic. A full 4.6 M-query run is not required for this bounded acceptance check and is substantially slower because it serializes every replay event.
