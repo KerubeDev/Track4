@@ -170,9 +170,8 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # QVAC stub — mock AI inference for demo mode
-  # Returns mock verdicts so the pipeline runs end-to-end.
-  # Replace with real QVAC adapter in issue #9 (S1-T5).
+  # Local QVAC-compatible inference endpoint. Replace the demo server image
+  # with the preloaded QVAC runtime for an offline production deployment.
   # ---------------------------------------------------------------------------
   qvac:
     build:
@@ -193,8 +192,7 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Emulator — replays DNS telemetry into Kafka
-  # Stub: generates synthetic events. Full implementation in issue #5 (S1-T1).
+  # Emulator — replays the mounted BIND9 dataset into Kafka.
   # ---------------------------------------------------------------------------
   emulator:
     build:
@@ -208,6 +206,8 @@ services:
       KAFKA_BOOTSTRAP: "kafka:${KAFKA_PORT:-9092}"
       KAFKA_TOPIC: "dns.telemetry.v1"
       DATASET_PATH: "/data/queries"
+    volumes:
+      - ../docs/data/LogsDNSQueries:/data/queries:ro
     depends_on:
       kafka:
         condition: service_healthy
@@ -220,8 +220,7 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Agent — consumes Kafka events, runs filter, alerts to Wazuh
-  # Stub: basic NXDOMAIN detection. Full filter in issue #8 (S1-T4).
+  # Agent — consumes Kafka events, persists telemetry, computes QoE, and alerts Wazuh.
   # ---------------------------------------------------------------------------
   agent:
     build:

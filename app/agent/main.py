@@ -25,6 +25,8 @@ from app.common.health import start_health_server
 from app.common.kafka import wait_for_kafka
 from app.agent.filter import DeterministicFilter
 from app.agent.qvac_adapter import QVACAdapter
+from app.agent.clickhouse_writer import ClickHouseWriter
+from app.agent.qoe_aggregator import QoEAggregator
 
 logger = logging.getLogger("sentinel.agent")
 
@@ -116,6 +118,8 @@ def run() -> None:
     )
 
     publisher = AlertPublisher(wazuh_host=WAZUH_HOST, wazuh_port=WAZUH_PORT)
+    writer = ClickHouseWriter(CLICKHOUSE_HOST, CLICKHOUSE_PORT, CLICKHOUSE_DB)
+    qoe = QoEAggregator(CLICKHOUSE_HOST, CLICKHOUSE_PORT, CLICKHOUSE_DB)
     consumed = 0
     alerts = 0
 
@@ -127,6 +131,8 @@ def run() -> None:
             consumed += 1
 
             alert = _process_event(event)
+            writer.write(event, alert)
+            qoe.add(event)
             if alert is not None:
                 vi = VerdictInfo(
                     verdict=alert["verdict"],
@@ -143,6 +149,8 @@ def run() -> None:
             if consumed % 100 == 0:
                 logger.info("Processed %d events, %d alerts", consumed, alerts)
     finally:
+        writer.close()
+        qoe.flush(final=True)
         consumer.close()
         logger.info("Agent finished — processed %d events, %d alerts", consumed, alerts)
 

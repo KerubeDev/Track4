@@ -55,7 +55,7 @@ class DeterministicFilter:
         self._windows: dict[str, deque[tuple[float, dict]]] = defaultdict(deque)
 
     def process(self, event: dict) -> dict | None:
-        now = _seconds(event.get("timestamp", 0))
+        now = _seconds(event.get("ts", event.get("timestamp", 0)))
         key = str(event.get("client_ip", ""))
         window = self._windows[key]
         window.append((now, event))
