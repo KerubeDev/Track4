@@ -1,29 +1,29 @@
 <!-- SHIELD structured-syslog decoder. -->
 <xml>
-  <decoder name="shield-json">
+  <decoder name="sentinel-dns-json">
     <program_name>sentinel-dns</program_name>
   </decoder>
 
   <decoder name="shield-json-verdict">
-    <parent>shield-json</parent>
+    <parent>sentinel-dns-json</parent>
     <regex type="pcre2">"sentinel\.verdict"\s*:\s*"([a-z_]+)"</regex>
     <order>sentinel.verdict</order>
   </decoder>
 
   <decoder name="shield-json-confidence">
-    <parent>shield-json</parent>
+    <parent>sentinel-dns-json</parent>
     <regex type="pcre2">"sentinel\.confidence"\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?)</regex>
     <order>sentinel.confidence</order>
   </decoder>
 
   <decoder name="shield-json-qname">
-    <parent>shield-json</parent>
+    <parent>sentinel-dns-json</parent>
     <regex type="pcre2">"qname"\s*:\s*"([^"\\]+)"</regex>
     <order>sentinel.qname</order>
   </decoder>
 
   <decoder name="shield-json-client">
-    <parent>shield-json</parent>
+    <parent>sentinel-dns-json</parent>
     <regex type="pcre2">"client_ip"\s*:\s*"([0-9a-fA-F:.]+)"</regex>
     <order>sentinel.client_ip</order>
   </decoder>
