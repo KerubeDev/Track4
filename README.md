@@ -1,251 +1,191 @@
 # SHIELD — Private DNS Intelligence at the Edge
 
-**SHIELD** is a local-first DNS telemetry intelligence system for regulated and privacy-sensitive infrastructure. It consumes DNS events as an additional Kafka consumer, detects suspicious behavior with an explainable deterministic stage, escalates only relevant evidence to a **local QVAC model**, produces structured Wazuh alerts, and computes an interpretable per-site DNS Quality of Experience (QoE) score in ClickHouse and Grafana.
+**SHIELD** is a local-first DNS intelligence agent for privacy-sensitive infrastructure. It detects DGA, DNS tunneling, typosquatting and periodic beaconing, explains why a query was escalated, asks a **local QVAC model** for the final semantic verdict, and computes an interpretable per-site DNS Quality of Experience (QoE) score.
 
-> DNS telemetry can reveal browsing and operational behavior. SHIELD is designed so inference remains on the operator-controlled machine or private network. There is no cloud-inference fallback.
+> DNS telemetry can expose browsing and operational behavior. SHIELD keeps inference on the operator-controlled machine or private network and has no cloud-inference fallback.
 
-## What SHIELD delivers
+## Two ways to run
 
-- **Security:** DGA, DNS tunneling, typosquatting and periodic beaconing detection with signal evidence and a local model verdict.
-- **Operational QoE:** a 0–100 score per site/minute using latency, NXDOMAIN rate and saturation signals.
-- **SOC integration:** structured remote-syslog events decoded and classified by Wazuh rules.
-- **Local AI:** QVAC exposes the model through a local OpenAI-compatible HTTP endpoint; SHIELD rejects public inference endpoints.
-- **Reproducible replay:** the supplied BIND-style query corpus can be replayed with deterministic attack episodes and synthetic dnstap fields where the source log has no response telemetry.
-- **Observable data plane:** Kafka transports telemetry, ClickHouse stores raw/aggregate data, and Grafana provides the operator view.
-
-## Architecture
+SHIELD deliberately separates the product logic from infrastructure. **Light mode is the recommended workstation path**: QVAC + Python + SQLite + a dependency-free dashboard. The full integration path remains available for validating Kafka, ClickHouse, Grafana and Wazuh.
 
 ```mermaid
 flowchart LR
-    B["BIND / dnstap telemetry"] --> E["Replay & normalization"]
-    E -->|dns.telemetry.v1| K[(Kafka)]
-    K --> A["SHIELD agent"]
-    A --> F["Deterministic signals"]
-    F -->|no escalation| C[(ClickHouse)]
-    F -->|candidate evidence| Q["QVAC local inference"]
-    Q --> A
-    A -->|structured alert| W["Wazuh"]
-    A -->|raw telemetry + QoE| C
-    C --> G["Grafana"]
+  D[DNS corpus / normalized JSONL] --> A[SHIELD Agent]
+  A --> F[Deterministic signals]
+  F -->|candidate| Q[QVAC local model]
+  Q --> A
+  A --> S[(SQLite)]
+  S --> U[Light dashboard]
+  A -. same contracts .-> K[(Kafka)]
+  A -. production integrations .-> C[(ClickHouse)]
+  A -. alerts .-> W[Wazuh]
+  C -.-> G[Grafana]
 ```
 
-### Detection path
+The local path is not a mock. It uses the same detector, QoE engine and real QVAC adapter as the full topology; only the transport, persistence and presentation adapters are lighter.
+
+## Fastest path: light mode
+
+Requirements: Python 3.11+, your locally installed QVAC runtime/model, and the DNS corpus under `docs/data/LogsDNSQueries` (or set `DATASET_PATH`). No Docker is required.
+
+Start QVAC on the host using the command supported by your installed QVAC version and expose its OpenAI-compatible endpoint on `127.0.0.1:11434`. SHIELD defaults to model `QWEN3_1_7B_INST_Q4` and refuses public inference endpoints.
+
+Then run:
+
+```bash
+./scripts/run-light.sh
+```
+
+Open `http://127.0.0.1:8080`. The script replays a bounded sample of the real corpus, injects deterministic evaluation episodes, sends only escalated evidence to your local QVAC endpoint, persists results in `data/shield.db`, and serves the local dashboard. Tune the workload without changing code:
+
+```bash
+LIGHT_LIMIT=10000 DATASET_PATH=/path/to/LogsDNSQueries ./scripts/run-light.sh
+```
+
+For a manual pipeline, first normalize/replay to JSONL and then process it:
+
+```bash
+python -m app.emulator.cli --dataset docs/data/LogsDNSQueries --rate 0 --attack --emit json --out data/input.jsonl --limit 50000
+python -m app.light.runtime --input data/input.jsonl --db data/shield.db --qvac-url http://127.0.0.1:11434
+python -m app.light.web --db data/shield.db --port 8080
+```
+
+## Detection path
 
 ```mermaid
 flowchart TD
-    X["DNS event"] --> V{"Valid qname, client, timestamp?"}
-    V -->|no| D["Drop malformed event"]
-    V -->|yes| S["Update bounded client window"]
-    S --> N["NXDOMAIN ratio"]
-    S --> H["Label entropy"]
-    S --> L["Long + high entropy + repetition"]
-    S --> R["Domain rarity + typosquat proximity"]
-    S --> B["Beacon interval variance"]
-    N --> E{"Escalation rule"}
-    H --> E
-    L --> E
-    R --> E
-    B --> E
-    E -->|no| P["Persist telemetry / QoE"]
-    E -->|yes| Q["QVAC local verdict"]
-    Q --> J{"Strict JSON contract valid?"}
-    J -->|yes| W["Publish Wazuh finding"]
-    J -->|no| U["Publish unverified finding"]
+  E[DNS event] --> V{Valid timestamp, client, qname?}
+  V -->|yes| S[Bounded per-client state]
+  V -->|no| X[Ignore malformed event]
+  S --> N[NXDOMAIN ratio]
+  S --> H[Label entropy]
+  S --> L[Long high-entropy repetition]
+  S --> R[Rarity + typo proximity]
+  S --> B[Periodic intervals]
+  N --> G{Escalation policy}
+  H --> G
+  L --> G
+  R --> G
+  B --> G
+  G -->|candidate| Q[QVAC local inference]
+  G -->|normal| P[Persist + QoE]
+  Q --> J{Strict JSON valid?}
+  J -->|yes| A[Finding + evidence]
+  J -->|no / unavailable| U[unverified finding]
 ```
 
-The first stage is deliberately deterministic. QVAC is not asked to inspect every DNS request; it reasons only over candidates and their signal evidence. This keeps inference bounded and makes every model call traceable to a concrete trigger.
+The deterministic stage prevents sending every query through an LLM. Every QVAC call is attributable to concrete evidence. The accepted verdicts are `benign`, `dga`, `tunnel`, `beaconing`, and `typosquat`; malformed/unavailable inference degrades to `unverified`, never silently to benign.
 
-## Local inference boundary
+## Local dashboard
 
-SHIELD uses `QWEN3_1_7B_INST_Q4` by default. The agent accepts only `http://` endpoints that resolve to loopback, link-local or private addresses (plus the local Docker service names). A public hostname/IP is rejected before an inference request is sent.
+The light dashboard is intentionally dependency-free and binds to loopback by default. It shows query volume, alert count/rate, average QVAC latency, threat distribution, recent detections and current QoE windows. It reads the same local SQLite database written by the light runtime and refreshes without a build step or Node runtime.
 
-The recommended setup is to run QVAC directly on the host, because the model is already installed there:
+## QoE
 
-```bash
-qvac serve --openai --no-default \
-  --config deploy/qvac/qvac.config.json \
-  --model QWEN3_1_7B_INST_Q4 \
-  --port 11434
-```
-
-Verify the local endpoint before starting the data plane:
-
-```bash
-curl -fsS http://localhost:11434/ping
-```
-
-## Quick start
-
-### 1. Requirements
-
-You need Docker with Compose v2, Python 3.11+ for local tests, a locally installed QVAC runtime with `QWEN3_1_7B_INST_Q4`, and the DNS query corpus available on disk.
-
-### 2. Configure
-
-```bash
-cp .env.example .env
-```
-
-The default container-to-host inference URL is:
-
-```text
-QVAC_URL=http://host.docker.internal:11434
-```
-
-Do not configure a public inference URL. SHIELD will refuse it.
-
-### 3. Prepare the DNS corpus
-
-The source corpus is intentionally not redistributed. Prepare the local ignored data directory with:
-
-```bash
-DATASET_SOURCE=/path/to/LogsDNSQueries.zip ./scripts/prepare-dataset.sh
-```
-
-The source query records remain unchanged. The replay layer adds versioned operational fields needed by the demo pipeline (`rcode`, latency, zone and PoP identity) because those response-side fields are absent from the BIND query log. Synthetic attack records are explicitly labeled with `ground_truth`; production detection code does not consume that field.
-
-### 4. Start the stack
-
-Keep QVAC running on the host, then start the data plane:
-
-```bash
-docker compose --env-file .env -f deploy/docker-compose.yml up -d \
-  kafka kafka-init clickhouse grafana wazuh emulator agent
-```
-
-Inspect health and logs:
-
-```bash
-docker compose --env-file .env -f deploy/docker-compose.yml ps
-docker compose --env-file .env -f deploy/docker-compose.yml logs -f agent
-```
-
-Grafana is available at `http://localhost:3000`. ClickHouse HTTP is exposed at `http://localhost:8123`. QVAC remains on `http://localhost:11434`.
-
-An optional containerized QVAC profile remains available for machines that have a suitable local image/model bundle:
-
-```bash
-docker compose --env-file .env -f deploy/docker-compose.yml --profile container-qvac up -d qvac
-```
-
-## Event and verdict contracts
-
-The normalized telemetry contract is versioned and contains the query identity, client, qtype, response code, latency, zone and PoP context. Evaluation-only provenance can be present in replayed events, but the agent never uses it to make a detection decision.
-
-QVAC receives only a compact candidate payload:
-
-```json
-{
-  "qname": "example.invalid",
-  "signal_evidence": {
-    "nxdomain_ratio": {"ratio": 0.83, "threshold": 0.6, "samples": 12}
-  },
-  "context": {"client_ip": "10.0.0.10"}
-}
-```
-
-The accepted model contract is:
-
-```json
-{
-  "verdict": "dga",
-  "confidence": 0.94,
-  "reasoning_short": "High NXDOMAIN ratio and algorithmic label shape.",
-  "recommended_action": "Investigate the client and block the domain if confirmed."
-}
-```
-
-`verdict` must be exactly one of `benign`, `dga`, `tunnel`, `beaconing`, or `typosquat`. Invalid output or an unavailable local model becomes an `unverified` finding rather than silently becoming benign.
-
-## QoE model
-
-The minute-level score is intentionally interpretable:
+SHIELD computes a per-site/minute 0–100 score from three explainable components:
 
 ```text
 QoE = 45% latency + 35% DNS success + 20% saturation
 ```
 
-The exact normalization thresholds and rationale are versioned in [`config/qoe.yaml`](config/qoe.yaml) and documented in [`docs/adr/0006-qoe-score-model.md`](docs/adr/0006-qoe-score-model.md). Labels are `Excellent` (>=85), `Good` (70–84), `Fair` (50–69), and `Poor` (<50).
+Labels are `Excellent` (>=85), `Good` (70–84), `Fair` (50–69), and `Poor` (<50). Exact thresholds and rationale live in `config/qoe.yaml` and `docs/adr/0006-qoe-score-model.md`.
 
-## Wazuh integration
+## Full integration topology
 
-The agent emits structured syslog to Wazuh. The repository provisions a custom decoder and local rules under [`deploy/wazuh/`](deploy/wazuh/). Severity is driven by verdict and confidence; benign model results do not create a security rule match, while local-inference failures are retained as lower-severity `unverified` findings for operator review.
+Use this only when validating infrastructure integrations or deploying the reference topology. Keep QVAC running on the host, then:
 
-## Validation
+```bash
+cp .env.example .env
+docker compose --env-file .env -f deploy/docker-compose.yml up -d \
+  kafka kafka-init clickhouse grafana wazuh emulator agent
+```
 
-Run the deterministic test suite first:
+On Linux the agent maps `host.docker.internal` to the host gateway, so the container can reach the host QVAC service. An optional `container-qvac` profile exists for environments with an appropriate preloaded local QVAC image/model bundle.
+
+```mermaid
+flowchart LR
+  B[BIND / dnstap telemetry] --> E[Replay + normalization]
+  E -->|dns.telemetry.v1| K[(Kafka)]
+  K --> A[SHIELD Agent]
+  A --> Q[QVAC on host]
+  A -->|structured syslog| W[Wazuh]
+  A --> C[(ClickHouse)]
+  C --> G[Grafana]
+```
+
+## Dataset and reproducibility
+
+The source DNS corpus is intentionally not redistributed. Prepare the ignored local directory with:
+
+```bash
+DATASET_SOURCE=/path/to/LogsDNSQueries.zip ./scripts/prepare-dataset.sh
+```
+
+The original query records remain unchanged. The replay layer synthesizes response-side fields (`rcode`, latency, zone and PoP identity) when the source BIND query log does not contain them. Synthetic attack records carry `ground_truth` exclusively for evaluation; production detection code does not consume that field. `DEMO_SEED=42` makes injected traffic and synthetic operational context reproducible.
+
+## Evaluation
+
+The evaluation harness reports per-class and macro precision/recall/F1, deterministic-filter elimination rate and filter/QVAC latency. Run the deterministic suite with:
 
 ```bash
 python3 -m pytest -q
 ```
 
-Validate Compose without starting containers:
-
-```bash
-docker compose --env-file .env -f deploy/docker-compose.yml config
-```
-
-Run the repository acceptance checks:
-
-```bash
-./scripts/verify-delivery.sh
-```
-
-For a real-model smoke test:
+Validate a real local model explicitly:
 
 ```bash
 QVAC_LIVE_SMOKE=1 python3 -m pytest -q tests/test_qvac_adapter.py
 ```
 
-A final local-inference verification should be performed with outbound network access disabled after all images/plugins/models are already present. The system intentionally has no heuristic or cloud fallback for that verification.
+For the full topology also run:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml config
+./scripts/verify-delivery.sh
+```
+
+A deployment should only be described as operational after the target machine has verified: real local QVAC inference, corpus replay, security detections, QoE output, and—when using the full topology—the Kafka, ClickHouse, Grafana and Wazuh paths. The repository intentionally contains no fake QVAC server.
+
+## QVAC contract
+
+QVAC receives a compact candidate payload rather than the raw stream:
+
+```json
+{"qname":"example.invalid","signal_evidence":{"nxdomain_ratio":{"ratio":0.83,"threshold":0.6,"samples":12}},"context":{"client_ip":"10.0.0.10"}}
+```
+
+Expected output:
+
+```json
+{"verdict":"dga","confidence":0.94,"reasoning_short":"High NXDOMAIN ratio and algorithmic label shape.","recommended_action":"Investigate the client and block the domain if confirmed."}
+```
+
+The adapter accepts only local/private HTTP endpoints and bounds timeout, retries, response size and text fields.
 
 ## Repository map
 
 ```text
-app/
-  agent/       deterministic filter, QVAC adapter, persistence, QoE, Wazuh publisher
-  common/      shared health, Kafka and DNS-domain primitives
-  emulator/    corpus parser, deterministic replay and attack episodes
-  eval/        precision/recall/F1, elimination and latency evaluation
-  qoe/         QoE scoring engine
-config/        versioned QoE and topology configuration
-deploy/        Compose, Kafka, ClickHouse, Grafana, Wazuh and optional QVAC image
-scripts/       dataset preparation, baselines and acceptance checks
-tests/         unit/integration contract tests
-docs/          architecture, domain model, ADRs and operational notes
+app/agent/       detector, QVAC adapter, ClickHouse and Wazuh adapters
+app/light/       SQLite runtime and lightweight local dashboard
+app/common/      shared Kafka, health and DNS-domain primitives
+app/emulator/    corpus parser, replay and deterministic attack episodes
+app/eval/        classification and latency evaluation
+app/qoe/         QoE scoring engine
+config/          versioned QoE/topology configuration
+deploy/          optional full integration topology
+scripts/         dataset, validation and light-mode entrypoints
+tests/           deterministic contract tests
+docs/            architecture, domain model and ADRs
 ```
 
-## Design decisions
+## Architecture decisions
 
-The architecture decision records are the source of truth for non-trivial choices:
+The ADRs are the source of truth for non-trivial choices: read-only telemetry consumption (`0001`), deterministic pre-filter + local AI (`0002`), local QVAC boundary (`0003`), Wazuh ingestion (`0004`), replay/schema provenance (`0005`) and QoE scoring (`0006`). See `docs/design.md` for the detailed design.
 
-- [`ADR-0001`](docs/adr/0001-read-only-telemetry-consumer.md): read-only telemetry consumer.
-- [`ADR-0002`](docs/adr/0002-two-stage-detection.md): deterministic pre-filter + local AI reasoning.
-- [`ADR-0003`](docs/adr/0003-qvac-local-http-offline.md): local QVAC HTTP boundary and offline behavior.
-- [`ADR-0004`](docs/adr/0004-wazuh-syslog-ingestion.md): Wazuh ingestion contract.
-- [`ADR-0005`](docs/adr/0005-telemetry-schema-synthesized-dnstap.md): replay schema and synthesized response telemetry.
-- [`ADR-0006`](docs/adr/0006-qoe-score-model.md): QoE scoring model.
+## Provenance and external foundations
 
-See [`docs/design.md`](docs/design.md) for the detailed system design and [`docs/domain.md`](docs/domain.md) for terminology.
+For reproducibility, SHIELD declares its external/pre-existing foundations: the quirk Skills bundle pinned by the repository for engineering workflow; the supplied BIND9 query corpus as read-only input; Tether QVAC and its model registry for local inference; official Kafka, ClickHouse, Grafana and Wazuh distributions for the optional integration topology; and public domain-security references used only to synthesize evaluation traffic. Zone/PoP mappings, latency profiles and injected attack episodes are synthetic fixtures and are not represented as observed production facts.
 
-## Provenance and pre-existing components
+## Privacy and operational security
 
-For reproducibility and attribution, SHIELD declares the external/pre-existing foundations used by the repository:
-
-| Component | Origin | Role in SHIELD |
-|---|---|---|
-| quirk Skills bundle | `quantumquirkxyz/skills-quirk`, pinned in `skills-lock.json` | Repository engineering workflow only; not runtime product code |
-| DNS query corpus | Ovnicom-provided BIND9 query dataset | Read-only replay input; not redistributed |
-| QVAC runtime and model registry | Tether QVAC (`qvac.tether.io`, `github.com/tetherto/qvac`) | Local inference runtime and `QWEN3_1_7B_INST_Q4` model |
-| Kafka, ClickHouse, Grafana, Wazuh | Their official container distributions | Local data plane, storage, visualization and SIEM |
-| Public DGA/typosquatting references | Public domain-security references used by the emulator | Synthetic evaluation traffic only |
-
-The zone-to-PoP mapping, latency profiles and injected attack episodes are synthetic evaluation fixtures. They are not represented as observed production facts.
-
-## Privacy and security model
-
-SHIELD assumes DNS telemetry is sensitive. The inference payload contains only the candidate qname, deterministic evidence and minimal operational context. No component requires a cloud AI API. Operators should additionally restrict container egress, protect Kafka/ClickHouse/Wazuh interfaces from untrusted networks, replace demonstration credentials, and apply their normal retention and access-control policy before production deployment.
-
-## Status
-
-The repository contains the complete reference pipeline and deterministic tests. A deployment is considered operational only after the local QVAC smoke test, Kafka ingestion, ClickHouse writes, QoE aggregation, Grafana datasource/dashboard and Wazuh alert path have all been verified on the target machine.
+SHIELD assumes DNS telemetry is sensitive. No cloud AI API is required. The light dashboard binds to `127.0.0.1`; the QVAC adapter rejects public inference endpoints. For a deployed full topology, additionally restrict network exposure/egress, replace demonstration credentials, protect data-plane interfaces, and apply the organization's retention/access-control policy.
