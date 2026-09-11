@@ -1,130 +1,36 @@
-import argparse
-import os
-import random
-import sys
-
+import argparse,os,random,sys
 from app.emulator import parser
 from app.emulator.attacks import build_attack_stream
-from app.emulator.emitter import JsonLinesEmitter, KafkaBufferError, KafkaEmitter, NullEmitter
-from app.emulator.mapping import ZoneMapping, DEFAULT_MAPPING_PATH
-from app.emulator.playback import Playback, synthesize_stream
-from app.emulator.replay import DEFAULT_RATE, DEFAULT_SEED, ReplayConfig, find_dataset_files, merged_stream
+from app.emulator.emitter import JsonLinesEmitter,KafkaBufferError,KafkaEmitter,NullEmitter
+from app.emulator.mapping import ZoneMapping,DEFAULT_MAPPING_PATH
+from app.emulator.playback import Playback,synthesize_stream,merge_event_streams
+from app.emulator.replay import DEFAULT_RATE,DEFAULT_SEED,ReplayConfig,find_dataset_files,merged_stream
 from app.emulator.synthesizer import DnstapSynthesizer
-
-EMITTERS = ("null", "json", "kafka")
-
-
+EMITTERS=("null","json","kafka")
+def _env_float(n,d):return float(os.environ[n]) if n in os.environ else d
+def _seed_default():return int(os.environ.get("DEMO_SEED") or os.environ.get("EMULATOR_SEED") or DEFAULT_SEED)
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(
-        prog="sentinel-dns-emulator",
-        description="Replay the BIND9 queries dataset with its original timestamps, "
-        "synthesize the dnstap layer (ADR-0005), and publish to Kafka.",
-    )
-    parser.add_argument("--dataset", default=os.environ.get("EMULATOR_DATASET", ""),
-                        help="directory with queries.N files")
-    parser.add_argument("--mapping", default=os.environ.get("ZONE_MAPPING", DEFAULT_MAPPING_PATH),
-                        help="path to zone_mapping.csv")
-    parser.add_argument("--rate", type=float, default=_env_float("REPLAY_RATE", DEFAULT_RATE),
-                        help="REPLAY_RATE: wall-clock compression factor (0 = no wait)")
-    parser.add_argument("--seed", type=int, default=_seed_default(),
-                        help="RNG seed for the synthesized dnstap layer and any injected attack stream")
-    parser.add_argument("--attack", action="store_true",
-                        help="inject the five-episode attack script (E1-E5) with ground truth into the replay")
-    parser.add_argument("--emit", choices=EMITTERS, default=os.environ.get("EMULATOR_EMIT", "null"),
-                        help="destination for the JSON events")
-    parser.add_argument("--out", default=None, help="JSON-lines output file (--emit json)")
-    parser.add_argument("--bootstrap", default=os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092"),
-                        help="Kafka bootstrap servers (--emit kafka)")
-    parser.add_argument("--limit", type=int, default=0, help="stop after N events (0 = replay all)")
-    parser.add_argument("--partitions", type=int, default=3, help="expected Kafka partitions")
-    return parser.parse_args(argv)
-
-
-def _env_float(name, default):
-    value = os.environ.get(name)
-    return float(value) if value is not None else default
-
-
-def _seed_default():
-    """Seed precedence: .env DEMO_SEED, then EMULATOR_SEED, then DEFAULT_SEED."""
-    value = os.environ.get("DEMO_SEED") or os.environ.get("EMULATOR_SEED")
-    return int(value) if value is not None else DEFAULT_SEED
-
-
+ p=argparse.ArgumentParser(prog="shield-emulator",description="Replay BIND9 queries, synthesize response telemetry, optionally inject labeled evaluation traffic, and emit normalized events.");p.add_argument("--dataset",default=os.environ.get("EMULATOR_DATASET",""));p.add_argument("--mapping",default=os.environ.get("ZONE_MAPPING",DEFAULT_MAPPING_PATH));p.add_argument("--rate",type=float,default=_env_float("REPLAY_RATE",DEFAULT_RATE));p.add_argument("--seed",type=int,default=_seed_default());p.add_argument("--attack",action="store_true");p.add_argument("--emit",choices=EMITTERS,default=os.environ.get("EMULATOR_EMIT","null"));p.add_argument("--out",default=None);p.add_argument("--bootstrap",default=os.environ.get("KAFKA_BOOTSTRAP","localhost:9092"));p.add_argument("--limit",type=int,default=0,help="maximum total emitted events after background/evaluation streams are merged (0=all)");p.add_argument("--partitions",type=int,default=3);return p.parse_args(argv)
 def _logical_window(dataset):
-    """First/last record timestamps across the merged dataset (the replay window)."""
-    first = None
-    last = None
-    for record in merged_stream(find_dataset_files(dataset)):
-        if first is None:
-            first = record.timestamp
-        last = record.timestamp
-    return first, last
-
-
-def build_emitter(args):
-    if args.emit == "json":
-        handle = sys.stdout if args.out is None else open(args.out, "w", encoding="utf-8")
-        return JsonLinesEmitter(handle)
-    if args.emit == "kafka":
-        return KafkaEmitter(args.bootstrap, partitions=args.partitions)
-    return NullEmitter()
-
-
+ first=last=None
+ for r in merged_stream(find_dataset_files(dataset)):
+  if first is None:first=r.timestamp
+  last=r.timestamp
+ return first,last
+def build_emitter(a):
+ if a.emit=="json":return JsonLinesEmitter(sys.stdout if a.out is None else open(a.out,"w",encoding="utf-8"))
+ if a.emit=="kafka":return KafkaEmitter(a.bootstrap,partitions=a.partitions)
+ return NullEmitter()
+def _limited(stream,limit):
+ if limit<=0:yield from stream;return
+ for i,e in enumerate(stream):
+  if i>=limit:return
+  yield e
 def run(argv=None):
-    args = parse_args(argv)
-    mapping = ZoneMapping.from_csv(args.mapping)
-    synthesizer = DnstapSynthesizer(random.Random(args.seed))
-
-    if args.dataset:
-        records = merged_stream(find_dataset_files(args.dataset))
-        background = synthesize_stream(records, mapping, synthesizer)
-    else:
-        background = iter(())
-
-    emitter = build_emitter(args)
-    playback = Playback(ReplayConfig(replay_rate=args.rate, seed=args.seed))
-    stream = _limited(background, args.limit)
-    attack_stream = None
-    if args.attack and args.dataset:
-        window = _logical_window(args.dataset)
-        attack_stream = build_attack_stream(
-            synthesizer, mapping, window, random.Random(args.seed)
-        )
-    try:
-        stats = playback.run(stream, emitter, attack_stream=attack_stream)
-    except KafkaBufferError as exc:
-        print(f"FATAL: {exc}", file=sys.stderr)
-        sys.exit(1)
-    emitter.close()
-    kafka_failed = ""
-    if args.emit == "kafka" and hasattr(emitter, "failed"):
-        kafka_failed = f" kafka_failed={emitter.failed}"
-    print(
-        f"replayed={stats.events} attack={stats.attack_events} "
-        f"window=({stats.first_ts} .. {stats.last_ts}) "
-        f"rate=x{_display_rate(args.rate)} seed={args.seed} emit={args.emit} "
-        f"decode_errs={parser.bad_decodes}{kafka_failed}"
-    )
-    return stats
-
-
-def _limited(stream, limit):
-    if limit <= 0:
-        return stream
-    return _head(stream, limit)
-
-
-def _head(stream, limit):
-    for i, event in enumerate(stream):
-        if i >= limit:
-            return
-        yield event
-
-
-def _display_rate(rate):
-    return rate if rate > 0 else "no-wait"
-
-
-if __name__ == "__main__":
-    run()
+ a=parse_args(argv);mapping=ZoneMapping.from_csv(a.mapping);synth=DnstapSynthesizer(random.Random(a.seed));background=synthesize_stream(merged_stream(find_dataset_files(a.dataset)),mapping,synth) if a.dataset else iter(());attack=None
+ if a.attack and a.dataset:attack=build_attack_stream(synth,mapping,_logical_window(a.dataset),random.Random(a.seed))
+ stream=merge_event_streams(background,attack) if attack is not None else background;emitter=build_emitter(a);playback=Playback(ReplayConfig(replay_rate=a.rate,seed=a.seed))
+ try:stats=playback.run(_limited(stream,a.limit),emitter)
+ except KafkaBufferError as exc:print(f"FATAL: {exc}",file=sys.stderr);raise SystemExit(1)
+ emitter.close();failed=f" kafka_failed={emitter.failed}" if a.emit=="kafka" and hasattr(emitter,"failed") else "";print(f"replayed={stats.events} attack={stats.attack_events} window=({stats.first_ts} .. {stats.last_ts}) rate=x{a.rate if a.rate>0 else 'no-wait'} seed={a.seed} emit={a.emit} decode_errs={parser.bad_decodes}{failed}");return stats
+if __name__=="__main__":run()

@@ -1,39 +1,30 @@
-<!--
-  local_decoder.xml — Sentinel-DNS JSON decoder
-  Issue #14 (S2-T4) — Wazuh syslog ingestion
-
-  Decodes one-line JSON alerts from the Sentinel-DNS agent.
-  The agent sends syslog with program name "sentinel-dns" and a JSON body.
-  This decoder extracts sentinel.verdict and sentinel.confidence into the
-  Wazuh event so that rules (100101–100106) can match on them and the
-  incident panel shows the evidence.
-
-  Regexes use PCRE2 (<regex type="pcre2">): Wazuh's default OS_Regex has no
-  character classes, treats "." as a literal dot, and does not support ".*"
-  quantifiers, so the JSON payloads could never match under the old patterns.
-
-  Structure note: Wazuh stops searching decoders once a top-level decoder
-  matches (it then only runs that decoder's children), so a parent decoder
-  identifies the event by program name and each ordered field is extracted
-  by its own sibling decoder (same name + <parent> back-reference).
--->
+<!-- SHIELD structured-syslog decoder. -->
 <xml>
-  <!-- Parent decoder: identifies the event; extracts nothing itself. -->
   <decoder name="sentinel-dns-json">
     <program_name>sentinel-dns</program_name>
   </decoder>
 
-  <!-- Sibling: extract verdict (ordered field 1). -->
-  <decoder name="sentinel-dns-json">
+  <decoder name="shield-json-verdict">
     <parent>sentinel-dns-json</parent>
-    <regex type="pcre2">"verdict"\s*:\s*"(\w+)"</regex>
+    <regex type="pcre2">"sentinel\.verdict"\s*:\s*"([a-z_]+)"</regex>
     <order>sentinel.verdict</order>
   </decoder>
 
-  <!-- Sibling: extract confidence (ordered field 2). -->
-  <decoder name="sentinel-dns-json">
+  <decoder name="shield-json-confidence">
     <parent>sentinel-dns-json</parent>
-    <regex type="pcre2">"confidence"\s*:\s*(0\.\d+|1(?:\.0+)?)</regex>
+    <regex type="pcre2">"sentinel\.confidence"\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?)</regex>
     <order>sentinel.confidence</order>
+  </decoder>
+
+  <decoder name="shield-json-qname">
+    <parent>sentinel-dns-json</parent>
+    <regex type="pcre2">"qname"\s*:\s*"([^"\\]+)"</regex>
+    <order>sentinel.qname</order>
+  </decoder>
+
+  <decoder name="shield-json-client">
+    <parent>sentinel-dns-json</parent>
+    <regex type="pcre2">"client_ip"\s*:\s*"([0-9a-fA-F:.]+)"</regex>
+    <order>sentinel.client_ip</order>
   </decoder>
 </xml>

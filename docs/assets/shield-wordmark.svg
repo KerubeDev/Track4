@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="280" viewBox="0 0 1200 280" role="img" aria-labelledby="title desc">
+  <title id="title">SHIELD</title>
+  <desc id="desc">Minimal dark wordmark with a geometric shield and DNS network motif.</desc>
+  <style>
+    .word { font: 700 86px Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: 18px; fill: #f8fbff; }
+    .tag { font: 500 19px Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: 5px; fill: #8ea4c7; }
+    .line { stroke: #263b5f; stroke-width: 2; fill: none; }
+    .signal { stroke: #7dd3fc; stroke-width: 3; fill: none; stroke-linecap: round; }
+    .node { fill: #7dd3fc; }
+  </style>
+  <rect x="1" y="1" width="1198" height="278" rx="28" fill="#07101f" stroke="#172a48" stroke-width="2"/>
+  <g transform="translate(64 44)">
+    <path d="M92 4 166 32v54c0 50-29 87-74 106C47 173 18 136 18 86V32L92 4Z" fill="#0b1729" stroke="#7dd3fc" stroke-width="3"/>
+    <path d="M92 28 143 47v39c0 35-18 62-51 79-33-17-51-44-51-79V47l51-19Z" class="line"/>
+    <circle cx="92" cy="72" r="7" class="node"/>
+    <circle cx="62" cy="102" r="5" class="node"/>
+    <circle cx="122" cy="102" r="5" class="node"/>
+    <circle cx="92" cy="132" r="5" class="node"/>
+    <path d="M92 79v46M86 78l-20 20M98 78l20 20M67 102h50" class="signal"/>
+  </g>
+  <g transform="translate(270 0)">
+    <text x="0" y="135" class="word">SHIELD</text>
+    <text x="4" y="180" class="tag">PRIVATE DNS INTELLIGENCE</text>
+    <path d="M4 209h705" class="line"/>
+    <circle cx="4" cy="209" r="4" class="node"/>
+    <circle cx="709" cy="209" r="4" class="node"/>
+    <path d="M744 209h92m18 0h38" class="signal"/>
+    <circle cx="846" cy="209" r="5" class="node"/>
+  </g>
+</svg>
