@@ -123,7 +123,7 @@ DATASET_SOURCE=/path/to/LogsDNSQueries.zip ./scripts/prepare-dataset.sh
 
 The original query records remain unchanged. The replay layer synthesizes response-side fields (`rcode`, latency, zone and PoP identity) when the source BIND query log does not contain them. Synthetic attack records carry `ground_truth` exclusively for evaluation; production detection code does not consume that field. `DEMO_SEED=42` makes injected traffic and synthetic operational context reproducible.
 
-## Evaluation
+## Evaluation and acceptance
 
 The evaluation harness reports per-class and macro precision/recall/F1, deterministic-filter elimination rate and filter/QVAC latency. Run the deterministic suite with:
 
@@ -131,7 +131,18 @@ The evaluation harness reports per-class and macro precision/recall/F1, determin
 python3 -m pytest -q
 ```
 
-Validate a real local model explicitly:
+Because the actual model is installed on the operator workstation, the strongest acceptance check runs there against the real OpenAI-compatible QVAC endpoint:
+
+```bash
+python3 scripts/verify-light.py \
+  --dataset docs/data/LogsDNSQueries \
+  --qvac-url http://127.0.0.1:11434 \
+  --limit 50000
+```
+
+This command first requires `/v1/models` to be reachable, then replays a deterministic corpus sample plus evaluation episodes through the real detector and QVAC adapter. It writes the ignored `data/validation-report.json` containing PASS/FAIL checks, processed events, QVAC candidate count, filter reduction, verdict distribution, unverified responses, QoE windows, and QVAC p50/p95 latency. A PASS requires real events, at least one QVAC candidate, no invalid/unavailable QVAC verdicts in the sample, and generated QoE windows.
+
+The narrower adapter smoke test remains available:
 
 ```bash
 QVAC_LIVE_SMOKE=1 python3 -m pytest -q tests/test_qvac_adapter.py
@@ -144,7 +155,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml config
 ./scripts/verify-delivery.sh
 ```
 
-A deployment should only be described as operational after the target machine has verified: real local QVAC inference, corpus replay, security detections, QoE output, and—when using the full topology—the Kafka, ClickHouse, Grafana and Wazuh paths. The repository intentionally contains no fake QVAC server.
+A deployment should only be described as operational after the target machine has verified real local QVAC inference, corpus replay, security detections and QoE output. When using the full topology, additionally verify Kafka, ClickHouse, Grafana and Wazuh. The repository intentionally contains no fake QVAC server.
 
 ## QVAC contract
 
@@ -160,7 +171,7 @@ Expected output:
 {"verdict":"dga","confidence":0.94,"reasoning_short":"High NXDOMAIN ratio and algorithmic label shape.","recommended_action":"Investigate the client and block the domain if confirmed."}
 ```
 
-The adapter accepts only local/private HTTP endpoints and bounds timeout, retries, response size and text fields.
+The adapter accepts only local/private HTTP endpoints and bounds timeout, retries and text fields.
 
 ## Repository map
 
