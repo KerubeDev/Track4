@@ -160,7 +160,7 @@ class TestHealthchecks:
         """ClickHouse healthcheck should ping the HTTP interface."""
         hc_test = compose_config["services"]["clickhouse"]["healthcheck"]["test"]
         test_str = " ".join(hc_test) if isinstance(hc_test, list) else str(hc_test)
-        assert "ping" in test_str.lower() or "8123" in test_str, (
+        assert "ping" in test_str.lower() or "8123" in test_str or "clickhouse-client" in test_str, (
             f"ClickHouse healthcheck should ping, got: {test_str}"
         )
 
@@ -237,7 +237,7 @@ class TestDemoProfile:
     def test_core_services_have_no_profile(self, compose_config: Dict[str, Any]) -> None:
         """Services that must always start should have no profile."""
         core_services = [
-            "kafka", "clickhouse", "grafana", "wazuh", "qvac",
+            "kafka", "clickhouse", "grafana", "wazuh",
             "provision", "emulator", "agent",
         ]
         for name in core_services:
@@ -373,12 +373,11 @@ class TestServiceDependencies:
         deps = emulator.get("depends_on", {})
         assert "kafka" in deps, "Emulator should depend on kafka"
 
-    def test_agent_depends_on_kafka_and_qvac(self, compose_config: Dict[str, Any]) -> None:
-        """Agent depends on Kafka and QVAC being healthy."""
+    def test_agent_depends_on_kafka_and_clickhouse(self, compose_config: Dict[str, Any]) -> None:
+        """Agent depends on in-compose dependencies; host QVAC is external."""
         agent = compose_config["services"]["agent"]
         deps = agent.get("depends_on", {})
         assert "kafka" in deps, "Agent should depend on kafka"
-        assert "qvac" in deps, "Agent should depend on qvac"
         assert "clickhouse" in deps, "Agent should depend on clickhouse"
 
 
@@ -451,9 +450,9 @@ class TestKafkaTopicProvisioning:
 # ===========================================================================
 
 class TestBuildContexts:
-    """V8: Python services have correct build contexts."""
+    """V8: application services build locally; QVAC is an external local runtime."""
 
-    PYTHON_SERVICES = ["qvac", "emulator", "agent"]
+    PYTHON_SERVICES = ["emulator", "agent"]
 
     def test_build_context_is_project_root(self, compose_config: Dict[str, Any]) -> None:
         """Python services build from the project root."""
@@ -474,3 +473,11 @@ class TestBuildContexts:
             assert "Dockerfile" in dockerfile, (
                 f"Service '{name}' Dockerfile should reference Dockerfile, got: '{dockerfile}'"
             )
+
+    def test_qvac_uses_preloaded_local_image(self, compose_config: Dict[str, Any]) -> None:
+        """QVAC must not be replaced by a repository-owned mock server."""
+        qvac = compose_config["services"]["qvac"]
+        assert "image" in qvac
+        assert "QVAC_IMAGE" in qvac["image"]
+        assert qvac["build"]["context"] == "./qvac"
+        assert qvac["build"]["dockerfile"] == "Dockerfile"

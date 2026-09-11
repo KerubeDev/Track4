@@ -9,10 +9,10 @@ from app.agent.qvac_adapter import MODEL, QVACAdapter
 
 
 def response(verdict="dga", confidence=0.92):
-    return json.dumps({"message": {"content": json.dumps({
+    return json.dumps({"choices": [{"message": {"content": json.dumps({
         "verdict": verdict, "confidence": confidence,
         "reasoning_short": "test", "recommended_action": "Block"
-    })}}).encode()
+    })}}]}).encode()
 
 
 def test_contract_and_payload_are_strictly_one_shot():
@@ -30,8 +30,8 @@ def test_contract_and_payload_are_strictly_one_shot():
     assert result.latency_ms >= 0
     assert len(calls) == 1
     assert calls[0][1]["model"] == MODEL
-    assert len(calls[0][1]["messages"]) == 1
-    prompt = json.loads(calls[0][1]["messages"][0]["content"])
+    assert len(calls[0][1]["messages"]) == 2
+    prompt = json.loads(calls[0][1]["messages"][1]["content"])
     assert prompt["qname"] == "x.example"
     assert prompt["signal_evidence"]["entropy"]["value"] == 4.2
 

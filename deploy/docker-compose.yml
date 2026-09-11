@@ -20,7 +20,7 @@ services:
   # Single-broker cluster for the demo; topic auto-created on first produce.
   # ---------------------------------------------------------------------------
   kafka:
-    image: bitnami/kafka:3.7
+    image: bitnamilegacy/kafka:3.7.0
     container_name: sentinel-kafka
     environment:
       # KRaft mode configuration
@@ -47,9 +47,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:${KAFKA_PORT:-9092} --list || exit 1"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 10
-      start_period: 30s
+      start_period: 60s
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ services:
   # Creates dns.telemetry.v1 with 3 partitions, retention ~1 h, cleanup.delete.
   # ---------------------------------------------------------------------------
   kafka-init:
-    image: bitnami/kafka:3.7
+    image: bitnamilegacy/kafka:3.7.0
     container_name: sentinel-kafka-init
     depends_on:
       kafka:
@@ -108,7 +108,7 @@ services:
       - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8123/ping"]
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -158,6 +158,7 @@ services:
       FILEBEAT_BOOTSTRAP: "no"
     volumes:
       - ./wazuh/etc/ossec.conf:/var/ossec/etc/ossec.conf:ro
+      - ./wazuh/etc/shared/ar.conf:/var/ossec/etc/shared/ar.conf:ro
       - ./wazuh/etc/decoders/local_decoder.xml:/var/ossec/etc/decoders/local_decoder.xml:ro
       - ./wazuh/etc/rules/local_rules.xml:/var/ossec/etc/rules/local_rules.xml:ro
       - wazuh-data:/var/ossec/data
@@ -170,17 +171,23 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Local QVAC-compatible inference endpoint. Replace the demo server image
-  # with the preloaded QVAC runtime for an offline production deployment.
+  # Local QVAC runtime. The image is supplied by the QVAC installation and
+  # must contain the precached model; no cloud endpoint is accepted.
   # ---------------------------------------------------------------------------
   qvac:
+    profiles: ["container-qvac"]
     build:
-      context: ..
-      dockerfile: deploy/docker/Dockerfile.python-base
+      context: ./qvac
+      dockerfile: Dockerfile
+      args:
+        QVAC_CLI_VERSION: "${QVAC_CLI_VERSION:-0.13.0}"
+    image: "${QVAC_IMAGE:-sentinel-qvac-local:preloaded}"
     container_name: sentinel-qvac
-    command: ["python", "-m", "app.qvac.server"]
+    command: ["qvac", "serve", "openai", "--host", "0.0.0.0", "--port", "${QVAC_PORT:-11434}"]
     environment:
       QVAC_PORT: "${QVAC_PORT:-11434}"
+      QVAC_MODEL: "${QVAC_MODEL:-QWEN3_1_7B_INST_Q4}"
+      QVAC_TIMEOUT_SECONDS: "${QVAC_TIMEOUT_SECONDS:-30}"
     ports:
       - "${QVAC_PORT:-11434}:${QVAC_PORT:-11434}"
     healthcheck:
@@ -235,13 +242,13 @@ services:
       CLICKHOUSE_HOST: "clickhouse"
       CLICKHOUSE_PORT: "${CLICKHOUSE_HTTP_PORT:-8123}"
       CLICKHOUSE_DB: "${CLICKHOUSE_DB:-sentinel_dns}"
-      QVAC_URL: "http://qvac:${QVAC_PORT:-11434}"
+      QVAC_URL: "${QVAC_URL:-http://host.docker.internal:${QVAC_PORT:-11434}}"
       WAZUH_HOST: "wazuh"
       WAZUH_PORT: "1514"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       kafka:
-        condition: service_healthy
-      qvac:
         condition: service_healthy
       clickhouse:
         condition: service_healthy

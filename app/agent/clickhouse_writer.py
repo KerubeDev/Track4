@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import logging
+from urllib.error import HTTPError
 from urllib import parse, request
 
 logger = logging.getLogger(__name__)
@@ -17,12 +18,20 @@ class ClickHouseWriter:
     @staticmethod
     def _send(url, body, timeout):
         req = request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-        with request.urlopen(req, timeout=timeout) as response:
-            response.read()
+        try:
+            with request.urlopen(req, timeout=timeout) as response:
+                response.read()
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            logger.error("ClickHouse rejected batch (%s): %s", exc.code, detail[:500])
+            raise
 
     def write(self, event, alert=None):
         alert = alert or {}
-        self._rows.append({"ts": event.get("ts", event.get("timestamp")), "client_ip": event.get("client_ip", ""),
+        timestamp = event.get("ts", event.get("timestamp"))
+        if isinstance(timestamp, str):
+            timestamp = timestamp.replace("T", " ").rstrip("Z")
+        self._rows.append({"ts": timestamp, "client_ip": event.get("client_ip", ""),
             "qname": event.get("qname", ""), "qtype": event.get("qtype", ""), "rcode": event.get("rcode", ""),
             "latency_ms": event.get("latency_ms", 0), "zone_id": event.get("zone_id", ""), "pop_id": event.get("pop_id", ""),
             "schema_version": event.get("schema_version", 1), "verdict": alert.get("verdict"),

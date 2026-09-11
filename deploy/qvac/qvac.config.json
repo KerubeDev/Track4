@@ -1,0 +1,13 @@
+{
+  "loggerConsoleOutput": true,
+  "loggerLevel": "info",
+  "serve": {
+    "models": {
+      "QWEN3_1_7B_INST_Q4": {
+        "model": "QWEN3_1_7B_INST_Q4",
+        "default": true,
+        "config": { "ctx_size": 8192 }
+      }
+    }
+  }
+}

@@ -36,6 +36,42 @@ All reasoning and the substantial product were built within the competition wind
 
 This repository also runs the quirk Skills workflow bundle, installed from the canonical upstream: `https://github.com/quantumquirkxyz/skills-quirk`.
 
+## Reproducible Demo Preparation
+
+The challenge dataset is not redistributed in this repository. Obtain it from
+the official Ovnicom challenge link, then prepare the local ignored directory:
+
+```bash
+DATASET_SOURCE=/path/to/official/LogsDNSQueries.zip ./scripts/prepare-dataset.sh
+```
+
+The demo requires a locally installed QVAC runtime image with the precached
+`QWEN3_1_7B_INST_Q4` model. Set `QVAC_IMAGE` in `.env` to that image. The
+compose file intentionally has no mock or cloud inference fallback.
+
+Before recording or submitting, run:
+
+```bash
+python3 -m pytest -q
+docker compose --env-file .env -f deploy/docker-compose.yml config
+./scripts/verify-delivery.sh
+```
+
+The final acceptance check must be performed with the real local QVAC image:
+the QVAC health endpoint must respond, an inference request must return the
+strict verdict contract, and the run must continue with network egress
+disabled. The repository deliberately does not substitute a heuristic mock for
+that check.
+
+Fast demo path with QVAC running on the host:
+
+```bash
+qvac serve --openai --no-default --config deploy/qvac/qvac.config.json \
+  --model QWEN3_1_7B_INST_Q4 --port 11434
+docker compose --env-file .env -f deploy/docker-compose.yml up -d \
+  kafka clickhouse grafana wazuh kafka-init emulator agent
+```
+
 ## Quick start
 
 - Validate the bundle from the repository root:
