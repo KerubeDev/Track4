@@ -1,27 +1,43 @@
-# Demo video script — Sentinel-DNS
+# SHIELD — 5-minute product walkthrough
 
-Target: ≤ 5 minutes, in Spanish (mandated by the rules), no credentials required, reproducible from the
-delivered repo.
+## 0:00–0:35 — Problem
 
-> The narration lines below stay in Spanish because the rules require the demo video to be in Spanish.
-> All other documentation in this repository is in English.
+DNS telemetry is operationally valuable but sensitive. It can expose user and company behavior, so sending raw queries or derived evidence to a public AI API is unacceptable in regulated environments.
 
-## Structure
+SHIELD adds intelligence to the existing DNS stream without changing the capture pipeline and keeps model inference on the operator-controlled machine.
 
-| Block | Time | On screen | Narration (Spanish) |
-|---|---|---|---|
-| 1. Problem | 0:00–0:40 | Ovnicom logo + slide: "Regulated clients, DNS telemetry, zero network egress" | "Nuestros clientes están regulados: su tráfico DNS no puede salir a una IA en la nube. La inteligencia debe vivir donde está el resolver: local." |
-| 2. Architecture | 0:40–1:30 | Diagram: emulator → Kafka → Sentinel-DNS (rules + local QVAC) → Wazuh + ClickHouse/Grafana | "Leemos el stream sin tocar producción; un filtro de reglas rápido separa lo sospechoso; QVAC razona localmente el veredicto; las alertas van a Wazuh y el QoE a Grafana." |
-| 3. Live demo | 1:30–3:00 | Terminal: event stream being classified + alerts in the Wazuh dashboard | "Ahora arrancamos el pipeline con el guion de ataque inyectado. Vemos dominios DGA y beaconing detectados en tiempo real; la alerta llega a Wazuh como incidente con veredicto y confianza." |
-| 4. QoE | 3:00–4:15 | Grafana dashboard: per-site score degrading (red) + culprit breakdown | "Un sitio se degrada: sube la latencia y el NXDOMAIN. El score baja, pasa a 'Malo', y el desglose muestra qué le quita puntos. Comparación entre sitios." |
-| 5. Privacy guarantee + close | 4:15–5:00 | `ip link set eth0 down` (or equivalent) and everything keeps running | "Modelo precargado del registry QVAC, red cortada: la inferencia y el dashboard siguen vivos. Local, interpretable, integrado al SIEM. Gracias." |
+## 0:35–1:15 — Architecture
 
-## Production notes
+Show the README architecture diagram.
 
-- Entire demo inference runs **offline**: preload the model before recording and cut the network in block 5.
-- In block 4, say explicitly that the dnstap layer (rcode/latency/zones) is **synthesized by the emulator**,
-  because the challenge dataset is a BIND9 log without those fields (honest provenance).
-- Keep audio in Spanish; ~30 seconds per key idea.
-- The published repo (Track4) must reproduce this demo exactly: `docker compose up` + model preload and
-  dataset download scripts.
-- Reference duration when recording: 4:45–5:00 to leave margin.
+The emulator/normalizer publishes `dns.telemetry.v1` to Kafka. SHIELD consumes that topic as an additional consumer. Every event is persisted to ClickHouse and contributes to the per-site QoE aggregate. Suspicious candidates pass through a deterministic evidence stage and only then reach QVAC. Findings are sent to Wazuh; Grafana reads operational QoE from ClickHouse.
+
+Emphasize that QVAC is running locally on the host and that there is no cloud-inference fallback.
+
+## 1:15–2:15 — Explainable security detection
+
+Show agent logs while replay traffic is running.
+
+Explain the five deterministic signals: NXDOMAIN ratio, entropy, long/high-entropy repetition, domain rarity/typosquat proximity and periodic beaconing. The filter reduces the volume that reaches the model and preserves the exact evidence responsible for each escalation.
+
+Open one finding and show the strict QVAC result: verdict, confidence, short reasoning and recommended action. Then show the corresponding structured Wazuh event/rule match.
+
+## 2:15–3:10 — Local inference boundary
+
+Show the QVAC process listening on `localhost:11434` and the configured `QVAC_URL` used by the containerized agent.
+
+Explain that the adapter rejects public inference endpoints. If the local model is unavailable or returns malformed output, SHIELD emits `unverified`; it never silently treats an inference failure as benign.
+
+## 3:10–4:10 — DNS QoE
+
+Open Grafana. Show the site score, latency, NXDOMAIN contribution and saturation component. Explain the 45/35/20 weighted model and the Excellent/Good/Fair/Poor labels.
+
+Clarify that the reference BIND corpus contains queries but not response latency/rcode, so those response-side fields and topology are synthesized in the replay environment. In a real dnstap deployment the same normalized contract is populated from observed response telemetry.
+
+## 4:10–4:45 — Reproducibility and evaluation
+
+Show the deterministic replay seed and the evaluation command. Mention precision/recall/F1, filter elimination rate and latency percentiles. Point out that `ground_truth` belongs only to the emulator/evaluation path and is never read by the production detector.
+
+## 4:45–5:00 — Close
+
+SHIELD turns an existing DNS stream into two local operational outputs: actionable security intelligence in Wazuh and interpretable site-level DNS quality in Grafana, while keeping inference and telemetry under operator control.
