@@ -1,4 +1,12 @@
-# SHIELD — Private DNS Intelligence at the Edge
+<div align="center">
+  <img src="docs/assets/shield-wordmark.svg" width="100%" alt="SHIELD — Private DNS Intelligence" />
+  <br />
+  <strong>Local-first DNS security intelligence with deterministic evidence and private AI inference.</strong>
+  <br /><br />
+  <code>LOCAL INFERENCE</code>&nbsp;&nbsp;·&nbsp;&nbsp;<code>EXPLAINABLE DETECTION</code>&nbsp;&nbsp;·&nbsp;&nbsp;<code>DNS QoE</code>&nbsp;&nbsp;·&nbsp;&nbsp;<code>NO CLOUD FALLBACK</code>
+</div>
+
+---
 
 **SHIELD** is a local-first DNS intelligence agent for privacy-sensitive infrastructure. It detects DGA, DNS tunneling, typosquatting and periodic beaconing, explains why a query was escalated, asks a **local QVAC model** for the final semantic verdict, and computes an interpretable per-site DNS Quality of Experience (QoE) score.
 
@@ -78,7 +86,7 @@ The deterministic stage prevents sending every query through an LLM. Every QVAC 
 
 ## Local dashboard
 
-The light dashboard is intentionally dependency-free and binds to loopback by default. It shows query volume, alert count/rate, average QVAC latency, threat distribution, recent detections and current QoE windows. It reads the same local SQLite database written by the light runtime and refreshes without a build step or Node runtime.
+The light dashboard is intentionally dependency-free and binds to loopback by default. It shows query volume, QVAC candidate count, deterministic filter reduction, alert count, average QVAC latency, signal evidence, model reasoning, threat distribution and current QoE windows. It reads the same local SQLite database written by the light runtime and refreshes without a build step or Node runtime.
 
 ## QoE
 
@@ -122,6 +130,18 @@ DATASET_SOURCE=/path/to/LogsDNSQueries.zip ./scripts/prepare-dataset.sh
 ```
 
 The original query records remain unchanged. The replay layer synthesizes response-side fields (`rcode`, latency, zone and PoP identity) when the source BIND query log does not contain them. Synthetic attack records carry `ground_truth` exclusively for evaluation; production detection code does not consume that field. `DEMO_SEED=42` makes injected traffic and synthetic operational context reproducible.
+
+## Engineering quality gates
+
+The repository defines one repeatable local quality path and runs the same core checks in CI on Python 3.11 and 3.12:
+
+```bash
+python -m pip install -r requirements-dev.txt
+make quality
+make compose-check
+```
+
+`make quality` runs the repository privacy/structure gate, Ruff static correctness checks, and the deterministic pytest suite. The structural gate compiles Python sources, validates JSON/XML, rejects tracked runtime artifacts, prevents evaluation ground truth from entering the production agent, prevents production imports from the emulator, and rejects reintroduction of a mock QVAC server. Contribution and vulnerability-handling expectations are documented in `CONTRIBUTING.md` and `SECURITY.md`.
 
 ## Evaluation and acceptance
 
